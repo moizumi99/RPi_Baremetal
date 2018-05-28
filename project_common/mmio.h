@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 
-// This part is take from the following tutorial
+// This part is taken from the following tutorial
 // http://wiki.osdev.org/ARM_RaspberryPi_Tutorial_C
 static inline void mmio_write(uint32_t reg, uint32_t data)
 {

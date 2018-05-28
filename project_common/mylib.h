@@ -46,11 +46,13 @@ void LogWrite (const char *pSource,		// short name of module
 //
 // Debug support
 //
+int debug_log(const char *format, ...);
 #ifndef NDEBUG
 // display "assertion failed" message and halt
 void uspi_assertion_failed (const char *pExpr, const char *pFile, unsigned nLine);
 // display hex dump (pSource can be 0)
-void DebugHexdump (const void *pBuffer, unsigned nBufLen, const char *pSource /* = 0 */);
+void debug_hex_dump (const void *pBuffer, unsigned nBufLen, const char *pSource /* = 0 */);
+// output log when DEBUG is on (use -DDEBUG in gcc option)
 #endif  // NDEBUG
 
 #endif  // MYLIB_H

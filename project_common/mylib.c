@@ -144,6 +144,8 @@ void dump(unsigned char *a, uint32_t size) {
 	}
 }
 
+/* The following function was used when */
+/* divider operator (/) was not liked */
 /* uint32_t u32_div(uint32_t n, uint32_t d) */
 /* { */
 /* 	signed int q; */
@@ -180,7 +182,6 @@ size_t strlen(const char* str)
 	}
 	return ret;
 }
-
 
 
 int putchar(char a)
@@ -427,9 +428,22 @@ void uspi_assertion_failed (const char *pExpr, const char *pFile, unsigned nLine
 	while(1) {}
 }
 
-void DebugHexdump (const void *pBuffer, unsigned nBufLen, const char *pSource /* = 0 */)
+void debug_hex_dump (const void *pBuffer, unsigned nBufLen, const char *pSource /* = 0 */)
 {
 	printf("Dump from %s\n", pSource);
 	dump((unsigned char *) pBuffer, nBufLen);
 }
+
+int debug_log(const char *format, ...) {
+    int i = 0;
+#ifdef DEBUG
+    va_list ap;
+    va_start(ap, format);
+    i = printf(format, ap);
+    va_end(ap);
+#else
+    return 0;
+#endif
+}
+
 

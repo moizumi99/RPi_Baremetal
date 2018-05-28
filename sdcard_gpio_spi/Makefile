@@ -1,10 +1,18 @@
 COMMON = ../project_common
-OBJS = boot.o kernel.o sdcard.o file.o helper.o $(COMMON)/uart.o $(COMMON)/mylib.o $(COMMON)/gpio.o
+ASRCS = boot.S
+SRCS1 = kernel.c sdcard.c file.c helper.c
+SRCS2 = $(COMMON)/uart.c $(COMMON)/gpio.c
+SRCS3 = $(COMMON)/mylib.c
+AOBJS := $(ASRCS:%.S=%.o)
+OBJS1 := $(SRCS1:%.c=%.o)
+OBJS2 := $(SRCS2:$(COMMON)/%.c=%.o)
+OBJS3 := $(SRCS3:$(COMMON)/%.c=%.o)
+OBJS := $(AOBJS) $(OBJS1) $(OBJS2) $(OBJS3)
 ARCH = armv6zk
 ISA = ARM6v2
 CPU = arm1176jzf-s
 CC = arm-none-eabi-gcc
-CFLAG =  -O0 -g -gdwarf-2 -march=$(ARCH) -mtune=$(CPU) -s -nostdlib -nostartfiles -ffreestanding -c -fno-builtin
+CFLAG =  -O0 -g -gdwarf-2 -march=$(ARCH) -mtune=$(CPU) -s -nostdlib -nostartfiles -ffreestanding -c -fno-builtin -DDEBUG
 CFLAG2 =  -std=gnu99
 INCLUDE = -I $(COMMON)
 ASM = arm-none-eabi-gcc
@@ -21,20 +29,22 @@ kernel.img: myos.elf
 	arm-none-eabi-objcopy myos.elf -O binary kernel.img
 
 myos.elf: $(OBJS) linker.ld
-	make -C $(COMMON)
 	$(LD) -T linker.ld $(OBJS) -o myos.elf $(LFLAG)
 
-.S.o:
+$(AOBJS): %.o: %.S
 	$(ASM) -c $< -o $@
 
-mylib.o: mylib.c
-	$(CC) $(CFLAG) $(INCLUDE) mylib.c -o mylib.o
+# source codes unique to this folder
+$(OBJS1): %.o: %.c
+	$(CC) $(CFLAG) $(CFLAG2) $(INCLUDE) $< -o $@
 
-# helper_test: helper_test.c helper.c helper.h
-# 	$(TESTCC) helper_test.c helper.c -o helper_test $(TESTFLAG)
+# source codes common to other projects
+$(OBJS2): %.o: $(COMMON)/%.c
+	$(CC) $(CFLAG) $(CFLAG2) $(INCLUDE) $< -o $@
 
-.c.o:
-	$(CC) $(CFLAG) $(CFLAG2) $(INCLUDE) $< -o $@ 
+# source codes that doesn't work with gnu99 option
+$(OBJS3): %.o: $(COMMON)/%.c
+	$(CC) $(CFLAG) $(INCLUDE) $< -o $@
 
 .PHONY:clean
 clean:

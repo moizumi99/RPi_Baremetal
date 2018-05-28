@@ -139,6 +139,7 @@ void init_filesystem()
         printf("ERROR: fat_bytesize is too big: %d\n", fat_bytesize);
         return;
     }
+    printf("Start reading fat data with size %d\n", sectorsPerFAT);
 	file_readfat(fatdata, fatadr);
     /* printf("FAT\n"); */
     /* dump((uint8_t *) fatdata, 512); */

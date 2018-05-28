@@ -9,7 +9,7 @@
 #include "gpio.h"
 #include "sdcard.h"
 #include "file.h"
- 
+
 void _enable_jtag();
 void cmd_dir();
 
@@ -80,10 +80,10 @@ void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
 
     printf("\nFile system access demo\n");
     printf("Read the FAT file system. ");
-    printf("(This may take a few minutes)\n");
     init_filesystem();
 
     printf("Showing the root folder contents\n");
+    printf("(This may take a few minutes)\n");
     cmd_dir();
 
     printf("\nDemo end\n");
@@ -108,6 +108,7 @@ void cmd_dir()
 	
 	for (i = 0; i <512; i++) {
 		if (finfo[i].name[0] == 0x00) {
+            debug_log("End of root entry\n");
 			break;
 		}
 		if (finfo[i].name[0] != 0xe5) {

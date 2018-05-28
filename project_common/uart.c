@@ -2,6 +2,7 @@
 
 #include "mmio.h"
 #include "uart.h"
+#include "gpio.h"
 #include "mylib.h"
 
 void _enable_jtag();
@@ -22,53 +23,17 @@ void uart_init()
 	// Disable AUX (AUX provides mini UART fnction with same ports. Disable before enabling UART)
 	mmio_write(AUX_ENABLES, mmio_read(AUX_ENABLES) & (!0x00000001));
 
-	// set pins to the defulat values
-	/* mmio_write(GPFSEL0, 0); */
-	/* mmio_write(GPFSEL1, 0); */
-	/* mmio_write(GPFSEL2, 0); */
-	/* mmio_write(GPFSEL3, 0); */
-	/* mmio_write(GPFSEL4, 0); */
-	/* mmio_write(GPFSEL5, 0); */
-	
 	// Disable UART0.
 	mmio_write(UART0_CR, 0x00000000);
 	
 	// Setup the GPIO pin 14 && 15 to alto 0
-	//    ra=GET32(GPFSEL1);
-	reg = mmio_read(GPFSEL1);
-    reg &=~(7<<12); //gpio14
-    reg |=4<<12;    //alt0
-    reg &=~(7<<15); //gpio15
-    reg |=4<<15;    //alt0
-	mmio_write(GPFSEL1, reg);
-	//    PUT32(GPFSEL1,ra);
+    gpioSetFunction(14, GPIO_ALT0);
+    gpioSetFunction(15, GPIO_ALT0);
  
-	// Pull up all 
-	mmio_write(GPPUD, 0x00000001);
-	delay_mmio(150);
-
-	// exclude pin4, 22, 24, 25, 27 used in jtag
-	mmio_write(GPPUDCLK0, ~((1 << 4) | (1 << 22) | (1<<24) | (1<<25) | (1<<27)));
-	mmio_write(GPPUDCLK1, 0xffffffff);
-	delay_mmio(150);
- 
-	// Write 0 to GPPUDCLK0/1 to make it take effect.
-	mmio_write(GPPUDCLK0, 0x00000000);
-	mmio_write(GPPUDCLK1, 0x00000000);
-	delay_mmio(150);
-
-	// Disable pull up/down for all GPIO pins & delay for 150 cycles.
-	mmio_write(GPPUD, 0x00000000);
-	delay_mmio(150);
- 
-	// Disable pull up/down for pin 14,15 & delay for 150 cycles.
-	mmio_write(GPPUDCLK0, (1 << 14) | (1 << 15));
-	delay_mmio(150);
- 
-	// Write 0 to GPPUDCLK0 to make it take effect.
-	mmio_write(GPPUDCLK0, 0x00000000);
-	delay_mmio(150);
- 
+    // pull down GPIO pin 14 & 15
+    gpioSetPull(14, GPIO_PULLUPDOWN_DOWN);
+    gpioSetPull(15, GPIO_PULLUPDOWN_DOWN);
+    
 	// Clear pending interrupts.
 	mmio_write(UART0_ICR, 0x7FF);
  

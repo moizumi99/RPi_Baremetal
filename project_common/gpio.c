@@ -29,14 +29,9 @@ void gpioSetFunction(int32_t pin, uint32_t val)
 		return;
 	}
 	reg = mmio_read(adr);
-	//	printf("read   reg: %08x\n", reg);
 	reg = reg & (~(7 << ((pin-base)*3)));
-	//	printf("mask value: %08x\n", ~(7 << ((pin-base)*3)));	
-	//	printf("masked reg: %08x\n", reg);
 	reg = reg | ((val & 7) << ((pin-base)*3));
-	//	printf("Final  reg: %08x\n", reg);
 	mmio_write(adr, reg);
-	//	printf("Write adr: %08x, val: %08x\n", adr, reg);
 	waitMicro(1);
 }
 
