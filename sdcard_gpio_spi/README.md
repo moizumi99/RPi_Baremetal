@@ -4,7 +4,7 @@
 This is a demo of baremental SD CARD access from Raspberry Pi
 
 ## Anything new from other work?
-It uses SPI mode, in contrary to sd mode (or bus mode) contrary to the regular Raspberry Pi OS uses.
+It uses SPI mode, in contrary to sd mode (or bus mode) that the regular Raspberry Pi OS uses.
 Also it accesses SD CARD through GPIO, instead of EMMC on Raspberry Pi, with the control by software.
 
 ## What's good about that?
