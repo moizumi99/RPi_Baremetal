@@ -50,6 +50,11 @@ void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
     printf("SD Initialization done\n");
     waitMicro(1000000);
 
+    printf("SD CARD, read demo\n");
+    printf("Read from block 0\n");
+    sdRead(0, buffer);
+    dump(buffer, 512);
+    
     printf("SD CARD, read write demo\n");
     printf("Read from block 4\n");
     sdRead(4, buffer);

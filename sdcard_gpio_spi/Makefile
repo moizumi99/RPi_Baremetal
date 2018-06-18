@@ -1,9 +1,9 @@
 COMMON = ../project_common
-ASRCS = boot.S
+ASRCS = $(COMMON)/boot.S
 SRCS1 = kernel.c sdcard.c file.c helper.c
 SRCS2 = $(COMMON)/uart.c $(COMMON)/gpio.c
 SRCS3 = $(COMMON)/mylib.c
-AOBJS := $(ASRCS:%.S=%.o)
+AOBJS := $(ASRCS:$(COMMON)/%.S=%.o)
 OBJS1 := $(SRCS1:%.c=%.o)
 OBJS2 := $(SRCS2:$(COMMON)/%.c=%.o)
 OBJS3 := $(SRCS3:$(COMMON)/%.c=%.o)
@@ -31,7 +31,7 @@ kernel.img: myos.elf
 myos.elf: $(OBJS) linker.ld
 	$(LD) -T linker.ld $(OBJS) -o myos.elf $(LFLAG)
 
-$(AOBJS): %.o: %.S
+$(AOBJS): %.o: $(COMMON)/%.S
 	$(ASM) -c $< -o $@
 
 # source codes unique to this folder
