@@ -79,8 +79,8 @@ void init_filesystem()
 		printf("Error: sdTransferBlocks (BPB): %d\n", i);
 		return;
 	}
-    /* printf("BPB\n"); */
-    /* dump(carddata, 512); */
+    printf("BPB\n");
+    dump(carddata, 512);
 	bytePerSector = carddata[11] + (carddata[12]<<8);
 	sectorsPerCluster = carddata[13];
 	reservedSectors = carddata[14] + (carddata[15]<<8);

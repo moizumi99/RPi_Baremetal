@@ -98,6 +98,11 @@ void *memSet(void *str, int c, size_t n)
 }
 
 
+void *memcpy(void *dest, const void *src, size_t n)
+{
+    return memCopy(dest, src, n);
+}
+
 void *memCopy(void *dest, const void *src, size_t n)
 {
 	char *d = (char *) dest;
