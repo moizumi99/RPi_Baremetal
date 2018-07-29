@@ -23,66 +23,64 @@ void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
 {
     uint32_t mask, data;
     uint8_t res;
-    uint8_t buffer[2048];
+    uint8_t buffer0[4096], buffer1[4096];
     
 	uart_init();
+    printf("\n--------- Demo Start -----------\n");
 	uart_puts("UART set up done\r\n");
 
-    printf("This is a demo program of SD CARD access in SPI mode\n");
+    printf("This is a demo program of SD CARD access in SD mode\n");
 
     sdInitInterface();
+    if (sdInitCard() == 0) {
+        printf("SD Card Initialization success\n");
+    } else {
+        printf("SD Card Initialization fail\n");
+        goto demo_end;
+    }
 
-    printf("SD Initialization start\n");
-    
-    res = 0xff;
-    uint8_t key;
-    while (1) {
-        if (sdInitCard() == 0) {
+    printf("Switch to high speed mode\n");
+    if (sdHighSpeedMode() < 0) {
+      printf("Switching to HighSpeed mode failed\n");
+      goto demo_end;
+    }
+    printf("Switching to high speed mode succeeded\n");
+
+    sdCheckSCR(buffer0);
+
+    printf("Read from block 0\n");
+    if (sdTransferBlocks(0, 1, buffer0, 0) < 0) {
+        goto demo_end;
+    }
+    if (sdTransferBlocks(1 * 512, 1, buffer0 + 512, 0) < 0) {
+        goto demo_end;
+    }
+    if (sdTransferBlocks(2 * 512, 1, buffer0 + 1024, 0) < 0) {
+        goto demo_end;
+    }
+    if (sdTransferBlocks(3 * 512, 1, buffer0 + 1536, 0) < 0) {
+        goto demo_end;
+    }
+
+    printf("Read from block 0 x 2\n");
+    if (sdTransferBlocks(0, 4, buffer1, 0) < 0) {
+        goto demo_end;
+    }
+
+    printf("single read\n");
+    dump(buffer0, 512);
+    printf("multiple read\n");
+    dump(buffer1, 512);
+
+    for(int32_t cnt = 0; cnt < 1024; cnt++) {
+        if (buffer0[cnt] != buffer1[cnt]) {
+            printf("Difference found at %4x\n", cnt);
+            printf("%2x VS %2x\n", buffer0[cnt], buffer1[cnt]);
             break;
         }
-        printf("Error: SD Initialization failed.\n");
-        printf("Init response: %u\n", res);
-        printf("Please remove and re-insert the SD card\n");
-        printf("Press ENTER key when done: ");
-        while(uart_getc() != 13) ;
-        uart_putc(13);
     }
-    printf("SD Initialization done\n");
-    waitMicro(1000000);
-
-    printf("SD CARD, read demo\n");
-    printf("Read from block 0\n");
-    sdRead(0, buffer);
-    dump(buffer, 512);
+    printf("No difference between single read and multiple read\n");
     
-    printf("SD CARD, read write demo\n");
-    printf("Read from block 4\n");
-    sdRead(4, buffer);
-    dump(buffer, 512);
-
-    for (uint32_t i=0; i<512; i++) {
-        buffer[512 + i] = i & 0xff;
-    }
-    printf("Write to block 4\n");
-    sdWrite(4, buffer + 512);
-
-    printf("Read from block 4\n");
-    sdRead(4, buffer + 1024);
-    dump(buffer + 1024, 512);
-
-    printf("Write the original to block 4\n");
-    sdWrite(4, buffer);
-
-    printf("Read from block 4\n");
-    sdRead(4, buffer + 1536);
-    dump(buffer + 1536, 512);
-
-    for (int32_t i = 0; i < 512; i++) {
-        if (buffer[i] != buffer[1536 + i]) {
-            printf("Error: mismatch at %d-th byte (%u vs %u)\n", i, buffer[i], buffer[1536 + i]);
-        }
-    }
-
     printf("\nFile system access demo\n");
     printf("Read the FAT file system. ");
     init_filesystem();
@@ -91,6 +89,7 @@ void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
     printf("(This may take a few minutes)\n");
     cmd_dir();
 
+ demo_end:
     printf("\nDemo end\n");
     
     // LED blink to show the end
@@ -103,7 +102,6 @@ void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
     }
       
 }
-
 
 void cmd_dir()
 {
@@ -132,3 +130,4 @@ void cmd_dir()
 	}
 	return;
 }
+
