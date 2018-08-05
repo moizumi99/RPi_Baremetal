@@ -2,12 +2,12 @@
 #include "uart.h"
 #include "mmio.h"
 
-inline void io_sti()
+void io_sti()
 {
 	asm volatile("cpsie i");
 }
 
-inline void io_cli()
+void io_cli()
 {
 	asm volatile("cpsid i");
 }
