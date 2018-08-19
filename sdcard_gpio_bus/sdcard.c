@@ -10,8 +10,10 @@
 
 #ifdef DEBUG
 #define LOG(args...) printf(args)
+#define LOGDUMP(args...) dump(args)
 #else
-#define LOG(...)
+#define LOG(args...)
+#define LOGDUMP(args...)
 #endif
 
 typedef enum PIN_DIRECTION {
@@ -35,6 +37,7 @@ PIN_DIRECTION data_direction;
 
 static uint16_t global_card_rca = 0;
 static uint16_t global_clk_mode = 0;
+static uint16_t high_speed_mode_en = 0;
 
 void clk_high_400k() {
     gpioSet(48);
@@ -70,6 +73,14 @@ void clk_low() {
     } else {
         clk_low_400k();
     }
+}
+
+void set_clock_mode_fast() {
+    global_clk_mode = 1;
+}
+
+void set_clock_mode_slow() {
+    global_clk_mode = 0;
 }
 
 void send_clock_400k(int32_t n) {
@@ -967,14 +978,16 @@ int32_t cmd6(uint8_t function_group, uint8_t function, uint8_t *resp, uint8_t *r
 {
     uint8_t cmd_array[] = {0x40 | 6, 0, 0, 0, 0, 0xff};
     switch(function_group) {
-    case 0: cmd_array[4] = function & 0x0F;
+    case 1: cmd_array[4] = function & 0x0F;
         break;
-    case 1:cmd_array[4] = (function & 0x0F) << 4;
+    case 2:cmd_array[4] = (function & 0x0F) << 4;
         break;
-    case 2: cmd_array[3] = function & 0x0F;
+    case 3: cmd_array[3] = function & 0x0F;
         break;
-    case 3:cmd_array[3] = (function & 0x0F) << 4;
+    case 4:cmd_array[3] = (function & 0x0F) << 4;
         break;
+    default:
+        ;
     }
     cmd_array[1] = 0x80; // switch function
     add_crc(cmd_array);
@@ -1270,13 +1283,15 @@ int32_t sdHighSpeedMode()
 {
     uint8_t resp[6];
     uint8_t buffer[1024];
-    int32_t length = cmd6(0, 1, resp, buffer);
+    const int function_group = 1;  // Access mode
+    const int function = 1;  // High-speed/SDR25
+    int32_t length = cmd6(function_group, function, resp, buffer);
     // SD CARD status is 512 bits = 64 bytes
     if (length != 64) {
         LOG("CMD6 failed %d\n", length);
         return -1;
     }
-    dump(buffer, 64);
+    LOGDUMP(buffer, 64);
     return 0;
 }
 
@@ -1294,7 +1309,7 @@ int32_t sdCheckSCR()
         LOG("ACMD51 returned short SCR\n");
         return -1;
     }
-    dump(buffer, 8);
+    LOGDUMP(buffer, 8);
     LOG("SCR Structure: %2x\n", (buffer[0] >> 4) & 0x0F);
     LOG("Spec Version: %2x\n", (buffer[0] & 0x0f));
     LOG("DAT Bus Width Support: %2x\n", buffer[1] & 0x0f);
