@@ -50,6 +50,22 @@ void clk_low_25M() {
     wait(CLK_WAIT_25MHZ);
 }
 
+void clk_high() {
+    if (clk_mode) {
+        clk_high_25M();
+    } else {
+        clk_high_400k();
+    }
+}
+
+void clk_low() {
+    if (clk_mode) {
+        clk_low_25M();
+    } else {
+        clk_low_400k();
+    }
+}
+
 void send_clock_400k(int32_t n) {
     for (int32_t i = 0; i < n; i++) {
         clk_high_400k();
@@ -142,20 +158,11 @@ void card_cmd_1bit(int32_t d) {
 
 // send command
 void send_cmd( uint8_t c) {
-    if (clk_mode == 0) {
-        for (int32_t i = 0; i < 8; i++) {
-            card_cmd_1bit(c & 0x80);
-            clk_high_400k();
-            clk_low_400k();
-            c <<= 1;
-        }
-    } else {
-        for (int32_t i = 0; i < 8; i++) {
-            card_cmd_1bit(c & 0x80);
-            clk_high_25M();
-            clk_low_25M();
-            c <<= 1;
-        }
+    for (int32_t i = 0; i < 8; i++) {
+        card_cmd_1bit(c & 0x80);
+        clk_high();
+        clk_low();
+        c <<= 1;
     }
     card_cmd_1bit(1);
 }
@@ -163,18 +170,18 @@ void send_cmd( uint8_t c) {
 // get command response
 uint8_t get_cmd_1bit() {
     uint8_t ret;
-    clk_high_400k();
+    clk_high();
     ret = gpioRead(SD_CMD);
-    clk_low_400k();
+    clk_low();
     return ret;
 }
 
 // get dat response
 uint8_t get_dat0_1bit() {
     uint8_t ret;
-    clk_high_400k();
+    clk_high();
     ret = gpioRead(SD_DA0);
-    clk_low_400k();
+    clk_low();
     return ret;
 }
 
@@ -561,7 +568,7 @@ int32_t check_cmd3_response(uint8_t *resp)
 
 int32_t wait_for_dat_rdy() {
     // todo: add necessary process
-    uint8_t ret = 0xFF;
+    uint8_t ret = 0;
     int32_t timeout = 1024;
     while(ret != 0xFF & timeout-->0) {
         ret = get_dat0_response();
@@ -1048,7 +1055,6 @@ int32_t write_data(int32_t bytes_in_block, const uint8_t *rwbuffer)
     send_data_to_bus(STOP_BIT);
     set_data_input();
 
-    // TODO: move the following to CMD24()
     uint8_t ret = 0;
     for (int i = 0; i < 6; i++) {
         ret = (ret << 1) | get_dat0_1bit();
@@ -1058,11 +1064,9 @@ int32_t write_data(int32_t bytes_in_block, const uint8_t *rwbuffer)
     }
     printf("CRC Response Good\n");
     // wait for busy (dat0 == 0) to end
-    int timeout_cnt = 0;
-    while (!get_dat0_1bit()) {
-        if (++timeout_cnt >= timeout_limit) {
-            goto WRITE_BUSY_ERROR;
-        }
+    if (wait_for_dat_rdy() < 0) {
+        printf("Command wait ready time out\n");
+        goto WRITE_BUSY_ERROR;
     }
     return byte_cnt;
 
@@ -1094,28 +1098,36 @@ int32_t cmd24(uint32_t address, uint8_t *resp, const uint8_t *rwbuffer)
         return -1;
     }
     send_cmd_array(cmd_array);
-    if (receive_response(6, resp)) {
-        printf("RESPONSE timeout error\n");
-        goto ERROR;
-    }
-    if (check_R1_response(resp, 24)) {
-        printf("CMD24 response error\n");
-        goto ERROR;
-    }
-    uint32_t data_cnt = write_data(512, rwbuffer);
-    send_clock(8);
+    if (receive_response(6, resp))
+        goto RESPONSE_TIME_OUT_ERROR;
+    return 0;
     
-    return data_cnt;
+RESPONSE_TIME_OUT_ERROR:
+    printf("RESPONSE timeout error\n");
+    return -1;
+}
 
- ERROR:
-    if (cmd12(resp) < 0) {
-        printf("CMD12 command time out\n");
-        goto EXIT;
+// TODO refactor cmd24 and cmd25 (both are almost same)
+// WRITE_MULTIPLE_BLOCK command
+int32_t cmd25(uint32_t address, uint8_t *resp, const uint8_t *rwbuffer)
+{
+    const int CMD = 25;
+    uint8_t cmd_array[] = {0x40 | CMD, 0, 0, 0, 0, 0xff};
+    cmd_array[1] = (address >> 24) & 0xFF;
+    cmd_array[2] = (address >> 16) & 0xFF;
+    cmd_array[3] = (address >> 8) & 0xFF;
+    cmd_array[4] = address & 0xFF;
+    add_crc(cmd_array);
+    if (wait_for_cmd_rdy() < 0) {
+        return -1;
     }
-    if (check_R1_response(resp, 12) < 0) {
-        printf("CMD12 response error\n");
-    }
- EXIT:
+    send_cmd_array(cmd_array);
+    if (receive_response(6, resp))
+        goto RESPONSE_TIME_OUT_ERROR;
+    return 0;
+    
+RESPONSE_TIME_OUT_ERROR:
+    printf("RESPONSE timeout error\n");
     return -1;
 }
 
@@ -1341,29 +1353,76 @@ int32_t sdReadMulti( uint32_t address, uint32_t block_count, uint8_t *buffer)
 }
 
 // Write to SD card from buffer. One 512bytes block.
-int32_t sdWrite( uint32_t address, const uint8_t *buffer)
+int32_t sdWrite(uint32_t address, const uint8_t *buffer)
 {
     uint8_t resp[6];
     uint32_t ret;
     clk_mode = 1;
-    ret = cmd24(address, resp, buffer);
+    if (cmd24(address, resp, buffer)) {
+        printf("CMD24 timeout error\n");
+        goto ERROR;
+    }
+    if (check_R1_response(resp, 24)) {
+        printf("Response error\n");
+        goto ERROR;
+    }
+    
+    uint32_t data_cnt = write_data(512, buffer);
+    send_clock(8);
     clk_mode = 0;
-    return ret;
+    return data_cnt;
+    
+ ERROR:
+    if (cmd12(resp) < 0) {
+        printf("CMD12 command time out\n");
+        return -1;
+    }
+    if (check_R1_response(resp, 12) < 0) {
+        printf("CMD12 response error\n");
+        return -1;
+    }
+    return -1;
 }
 
 // Writes TO SD Card multiple blocks.
-int32_t sdWriteMulti( uint32_t address, uint32_t block_count, const uint8_t *buffer)
+int32_t sdWriteMulti( uint32_t address, uint32_t num_blocks, const uint8_t *buffer)
 {
-  int32_t total_bytes = 0;
-  for (int block = 0; block < block_count; block++) {
-    int32_t ret = sdWrite(address, buffer + block * 512);
-    if (ret < 0) {
-      printf("Error when writing %d block\n", block);
-      return -1;
+    uint8_t resp[6];
+    uint32_t ret;
+    clk_mode = 1;
+    if (cmd25(address, resp, buffer)) {
+        printf("CMD25 timeout\n");
+        goto EXIT;
     }
-    total_bytes += ret;
-  }
-  return total_bytes;
+    if (check_R1_response(resp, 25)) {
+        printf("CMD25 Response error\n");
+        goto EXIT;
+    }
+
+    uint32_t total_data_cnt = 0;
+    for (int block_cnt = 0; block_cnt < num_blocks; block_cnt++) {
+        int data_cnt = write_data(512, buffer + 512 * block_cnt);
+        total_data_cnt += data_cnt;
+        if (data_cnt < 512) {
+            // something wrong with transfer
+            printf("Blcok number #%d transfer bytes = %d"
+                   "(512 expected). Abort.\n", block_cnt, data_cnt);
+            goto EXIT;
+        }
+    }
+    
+ EXIT:
+    if (cmd12(resp) < 0) {
+        printf("CMD12 command time out\n");
+        return -1;
+    }
+    if (check_R1_response(resp, 12) < 0) {
+        printf("CMD12 response error\n");
+        return -1;
+    }
+    send_clock(8);
+    clk_mode = 0;
+    return total_data_cnt;
 }
 
 int32_t sdTransferBlocks( int64_t address, int32_t numBlocks, uint8_t* buffer, int32_t write ) {

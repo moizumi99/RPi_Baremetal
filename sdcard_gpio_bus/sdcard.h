@@ -16,7 +16,7 @@ int32_t sdHighSpeedMode();
     
 /* // write to SD card from rwbuffer  512 bytes block */
 int32_t sdWrite( uint32_t address, const uint8_t *buffer );
-int32_t sdWriteMulti( uint32_t address, uint32_t block_length, const uint8_t *buffer );
+int32_t sdWriteMulti( uint32_t address, uint32_t num_blocks, const uint8_t *buffer );
 
 /* // read from SD card to rwbuffer  512bytes block */
 int32_t sdRead( uint32_t address, uint8_t *buffer );

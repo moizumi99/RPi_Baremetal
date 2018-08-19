@@ -1,7 +1,6 @@
 -fopenmp
 -I/usr/include
--I/usr/lib/gcc/arm-none-eabi/4.9.3/include
--I../project_common
+-I${ARM_NONE_EABI}/include
 -std=gnu99
 --target=armv6zk
 -lcunit

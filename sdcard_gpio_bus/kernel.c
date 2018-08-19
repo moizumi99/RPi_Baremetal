@@ -23,7 +23,7 @@ void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
 {
     uint32_t mask, data;
     uint8_t res;
-    uint8_t buffer0[4096], buffer1[4096], buffer[4096];
+    uint8_t buffer0[4096], buffer1[4096], buffer[512 * 4 * 4];
     
 	uart_init();
     printf("\n--------- Demo Start -----------\n");
@@ -78,21 +78,22 @@ void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
         if (buffer0[cnt] != buffer1[cnt]) {
             printf("Difference found at %4x\n", cnt);
             printf("%2x VS %2x\n", buffer0[cnt], buffer1[cnt]);
-            break;
+            goto demo_end;
         }
     }
     printf("No difference between single read and multiple read\n");
     
     printf("SD CARD, read write demo\n");
 
+    // Single block read write demo
     printf("Read from block 4\n");
     sdRead(4, buffer);
     dump(buffer, 512);
 
+    printf("Write increasing numbers (0, 1, 2, 3, ...) to block 4\n");
     for (uint32_t i=0; i<512; i++) {
         buffer[512 + i] = i & 0xff;
     }
-    printf("Write to block 4\n");
     if (sdWrite(4, buffer + 512) != 512) {
         printf("Write Error\n");
         goto demo_end;
@@ -139,8 +140,66 @@ void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
     if (errors == 0) {
         printf("No mismatch\n");
     }
-    goto demo_end;
+
+    // Multiple blocks read write demo
+    printf("Read from block 4 - 7\n");
+    sdReadMulti(4, 4, buffer);
+    dump(buffer, 512 * 4);
+
+    printf("Write increasing numbers (0, 1, 2, 3, ...) to block 4 - 7\n");
+    for (uint32_t i = 0; i < 512 * 4; i++) {
+        buffer[512 * 4 + i] = i & 0xff;
+    }
+    if (sdWriteMulti(4, 4, buffer + 512 * 4) != 512 * 4) {
+        printf("Write Error\n");
+        goto demo_end;
+    }
+
+    printf("Read from block 4 - 7\n");
+    if (sdReadMulti(4, 4, buffer + 512 * 4 * 2) != 512 * 4) {
+        printf("Read Error\n");
+        goto demo_end;
+    }
+    dump(buffer + 512 * 4 * 2, 512 * 4);
+
+    errors = 0;
+    for (int32_t i = 0; i < 512 * 4; i++) {
+        if (buffer[512 * 4 + i] != buffer[512 * 4 * 2 + i]) {
+            printf("Error: mismatch at %d-th byte (%u vs %u)\n", i,
+                   buffer[512 * 4 + i], buffer[512 * 4 * 2 + i]);
+            errors++;
+        }
+    }
+    if (errors == 0) {
+        printf("No mismatch\n");
+    }
     
+    printf("Write the original to block 4 - 7\n");
+    if (sdWriteMulti(4, 4, buffer) != 512 * 4) {
+        printf("Write error\n");
+        goto demo_end;
+    }
+
+    printf("Read from block 4 - 7\n");
+    if (sdReadMulti(4, 4, buffer + 512 * 4 * 3) != 512 * 4) {
+        printf("Read error\n");
+        goto demo_end;
+    }
+    dump(buffer + 512 * 4 * 3, 512 * 4);
+
+    errors = 0;
+    for (int32_t i = 0; i < 512 * 4; i++) {
+        if (buffer[i] != buffer[512 * 4 * 3 + i]) {
+            printf("Error: mismatch at %d-th byte (%u vs %u)\n", i,
+                   buffer[i], buffer[512 * 4 * 3 + i]);
+            errors++;
+        }
+    }
+    if (errors == 0) {
+        printf("No mismatch\n");
+    }
+
+    // file access demo
     printf("\nFile system access demo\n");
     printf("Read the FAT file system. ");
     init_filesystem();
