@@ -8,6 +8,12 @@
 // TODO: define the correct value
 #define CLK_WAIT_25MHZ 1
 
+#ifdef DEBUG
+#define LOG(args...) printf(args)
+#else
+#define LOG(...)
+#endif
+
 typedef enum PIN_DIRECTION {
     PIN_INPUT = 0,
     PIN_OUTPUT = 1 } PIN_DIRECTION;
@@ -27,8 +33,8 @@ PIN_DIRECTION data_direction;
 #define START_BIT 0
 #define STOP_BIT 7
 
-uint16_t card_rca = 0;
-uint16_t clk_mode = 0;
+static uint16_t global_card_rca = 0;
+static uint16_t global_clk_mode = 0;
 
 void clk_high_400k() {
     gpioSet(48);
@@ -51,7 +57,7 @@ void clk_low_25M() {
 }
 
 void clk_high() {
-    if (clk_mode) {
+    if (global_clk_mode) {
         clk_high_25M();
     } else {
         clk_high_400k();
@@ -59,7 +65,7 @@ void clk_high() {
 }
 
 void clk_low() {
-    if (clk_mode) {
+    if (global_clk_mode) {
         clk_low_25M();
     } else {
         clk_low_400k();
@@ -81,7 +87,7 @@ void send_clock_25M(int32_t n) {
 }
 
 void send_clock(int32_t n) {
-    if (clk_mode == 0) {
+    if (global_clk_mode == 0) {
       send_clock_400k(n);
     } else {
       send_clock_25M(n);
@@ -107,6 +113,16 @@ uint8_t crc7(const uint8_t *buff, int32_t len )
     return( crc );
 }
 
+uint16_t crc16_update(uint16_t crc, uint8_t new_bit)
+{
+    new_bit ^= ((crc >> 15) & 1);
+    crc <<= 1;
+    if (new_bit) {
+        crc ^= 0x1021;
+    }
+    return crc;
+}
+
 void add_crc(uint8_t *cmd_array)
 {
     uint8_t crc = (crc7(cmd_array, 5) << 1) & 0x0ff;
@@ -114,21 +130,32 @@ void add_crc(uint8_t *cmd_array)
     cmd_array[5] = crc;
 }
 
-void set_cmd_output() {
+int32_t check_crc7(uint8_t *resp, int length_of_resp) {
+    uint8_t expected_crc = crc7(resp, length_of_resp - 1);
+    uint8_t actual_crc = ((resp[length_of_resp - 1] >> 1) & 0xff);
+    if ( actual_crc != expected_crc ) {
+        LOG("CRC response mismatch \n");
+        LOG("Expected CRC: %x, Actual CRC: %x\n", expected_crc, actual_crc);
+        return -1;
+    }
+    return 0;
+}
+
+void set_cmd_direction_output() {
     if (cmd_direction != PIN_OUTPUT) {
         gpioSetFunction(SD_CMD, GPIO_OUTPUT);
         cmd_direction = PIN_OUTPUT;
     }
 }
 
-void set_cmd_input() {
+void set_cmd_direction_input() {
     if (cmd_direction != PIN_INPUT) {
         gpioSetFunction(SD_CMD, GPIO_INPUT);
         cmd_direction = PIN_INPUT;
     }
 }
 
-void set_data_output() {
+void set_data_direction_output() {
     if (data_direction != PIN_OUTPUT) {
         gpioSetFunction(SD_DA0, GPIO_OUTPUT);
         gpioSetFunction(SD_DA1, GPIO_OUTPUT);
@@ -138,7 +165,7 @@ void set_data_output() {
     }
 }
 
-void set_data_input() {
+void set_data_direction_input() {
     if (data_direction != PIN_INPUT) {
         gpioSetFunction(SD_DA0, GPIO_INPUT);
         gpioSetFunction(SD_DA1, GPIO_INPUT);
@@ -148,7 +175,7 @@ void set_data_input() {
     }
 }
 
-void card_cmd_1bit(int32_t d) {
+void set_cmd_1bit(int32_t d) {
     if (d == 0) {
         gpioClear(SD_CMD);
     } else {
@@ -159,12 +186,12 @@ void card_cmd_1bit(int32_t d) {
 // send command
 void send_cmd( uint8_t c) {
     for (int32_t i = 0; i < 8; i++) {
-        card_cmd_1bit(c & 0x80);
+        set_cmd_1bit(c & 0x80);
         clk_high();
         clk_low();
         c <<= 1;
     }
-    card_cmd_1bit(1);
+    set_cmd_1bit(1);
 }
 
 // get command response
@@ -176,7 +203,80 @@ uint8_t get_cmd_1bit() {
     return ret;
 }
 
-// get dat response
+int32_t get_cmd_byte() {
+    int32_t ret = 0;
+    for (int32_t i=0; i < 8; i++) {
+        ret = (ret << 1) | get_cmd_1bit();
+    }
+    return ret;
+}
+
+// get command response and data response
+uint8_t get_cmd_and_dat_4bit(uint8_t *dat) {
+    uint8_t ret;
+    uint8_t dat_read;
+    clk_high_25M();
+    ret = gpioRead(SD_CMD);
+    dat_read  = gpioRead(SD_DA3) << 3;
+    dat_read |= gpioRead(SD_DA2) << 2;
+    dat_read |= gpioRead(SD_DA1) << 1;
+    dat_read |= gpioRead(SD_DA0);
+    clk_low_25M();
+    *dat = dat_read;
+    return ret;
+}
+
+int32_t get_cmd_response(uint32_t length, uint8_t *resp)
+{
+    set_cmd_direction_input();
+    int32_t timeout = (global_clk_mode == 0) ? 4096 : 4096 * 256;
+    int32_t ret = 1;
+    while (ret != 0 & --timeout > 0) {
+        ret = get_cmd_1bit();
+    }
+    if (timeout < 0) {
+        goto ERROR;
+    }
+    for (int32_t i=0; i < 7; i++) {
+        ret = (ret << 1) | get_cmd_1bit();
+    }
+    resp[0] = ret & 0xFF;
+    for (int32_t i = 1; i < length; i++) {
+        resp[i] = get_cmd_byte();
+    }
+    return 0;
+ ERROR:
+    LOG("CMD response timeout\n");
+    return -1;
+    
+}
+
+int32_t wait_for_cmd_rdy() {
+    int32_t timeout = (global_clk_mode == 0) ? 4096 : 4096 * 256;
+    uint8_t ret = 0;
+    while(ret != 0xFF & timeout-->0) {
+        ret = get_cmd_byte();
+    }
+    if (ret != 0xFF) {
+        LOG("Time out. The CMD LINE is busy\n");
+        return -1;
+    }
+    return 0;
+}
+
+void send_cmd_array(uint8_t *cmd_array)
+{
+    set_cmd_direction_output();
+    send_cmd(cmd_array[0]);
+    send_cmd(cmd_array[1]);
+    send_cmd(cmd_array[2]);
+    send_cmd(cmd_array[3]);
+    send_cmd(cmd_array[4]);
+    send_cmd(cmd_array[5]);
+    set_cmd_direction_input();
+}
+
+// get dat0 1 bit response
 uint8_t get_dat0_1bit() {
     uint8_t ret;
     clk_high();
@@ -185,43 +285,7 @@ uint8_t get_dat0_1bit() {
     return ret;
 }
 
-void send_cmd_array(uint8_t *cmd_array)
-{
-    set_cmd_output();
-    send_cmd(cmd_array[0]);
-    send_cmd(cmd_array[1]);
-    send_cmd(cmd_array[2]);
-    send_cmd(cmd_array[3]);
-    send_cmd(cmd_array[4]);
-    send_cmd(cmd_array[5]);
-    set_cmd_input();
-}
-
-int32_t get_cmd_response_wait() {
-    // wait for 0
-    int32_t timeout = (clk_mode == 0) ? 4096 : 4096 * 256;
-    int32_t ret = 1;
-    while (ret != 0 && timeout-->0) {
-        ret = get_cmd_1bit();
-    }
-    if (timeout < 0) {
-        printf("Response not coming in\n");
-        return -1;
-    }
-    for (int32_t i=0; i < 7; i++) {
-        ret = (ret << 1) | get_cmd_1bit();
-    }
-    return ret;
-}
-
-int32_t get_cmd_response() {
-    int32_t ret = 0;
-    for (int32_t i=0; i < 8; i++) {
-        ret = (ret << 1) | get_cmd_1bit();
-    }
-    return ret;
-}
-
+// get 8 cycle response from dat0 line
 int32_t get_dat0_response() {
     int32_t ret = 0;
     for (int32_t i=0; i < 8; i++) {
@@ -230,97 +294,14 @@ int32_t get_dat0_response() {
     return ret;
 }
 
-int32_t wait_for_cmd_rdy() {
-    // todo: add necessary process
-    uint8_t ret = 0xFF;
-    int32_t timeout = 1024;
+int32_t wait_for_dat_rdy() {
+    int32_t timeout = (global_clk_mode == 0) ? 4096 : 4096 * 256;
+    uint8_t ret = 0;
     while(ret != 0xFF & timeout-->0) {
-        ret = get_cmd_response();
+        ret = get_dat0_response();
     }
     if (ret != 0xFF) {
-        printf("Time out. The CMD LINE is busy\n");
-        return -1;
-    }
-    return 0;
-}
-
-int32_t receive_response(uint32_t length, uint8_t *resp)
-{
-    int32_t ret;
-    set_cmd_input();
-    ret = get_cmd_response_wait();
-    if (ret < 0) {
-        return -1;
-    }
-    resp[0] = ret & 0xFF;
-    for (int32_t i = 1; i < length; i++) {
-        resp[i] = get_cmd_response();
-    }
-    // TODO: Add CRC check
-    return 0;
-}
-
-int32_t cmd0() {
-    uint8_t cmd_array[] = {0x40, 0, 0, 0, 0, 0xff};
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
-        return -1;
-    }
-    send_cmd_array(cmd_array);
-    send_clock_400k(8);
-    return 0;
-}
-
-int32_t cmd8(uint8_t vhs,
-                   uint8_t checkpattern, uint8_t *resp)
-{
-    uint8_t cmd_array[] = {0x40 | 8, 0, 0, vhs, checkpattern, 0xff};
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
-        return -1;
-    }
-    send_cmd_array(cmd_array);
-    int32_t ret = receive_response(6, resp);
-    send_clock_400k(8);
-    return ret;
-}
-
-int32_t check_cmd8_response(uint8_t *resp)
-{
-    printf("[47-40]: CMD Index (06 expected): %02x\n", resp[0]);
-    printf("[39-32]: RESERVED (00 expected): %02x\n", resp[1]);
-    printf("[31-24]: RESERVED (00 expected): %02x\n", resp[2]);
-    printf("[23-16]: Voltage Accepted (01 expected): %02x\n", resp[3]);
-    printf("[15- 8]: Check Pattern (aa expected): %02x\n", resp[4]);
-    printf("[ 7- 0]: CRC + end bit: %02x\n", resp[5]);
-    // check for illegal command or non-compatible card
-    if (resp[3] != 1 || resp[4] != 0xaa) {
-        return -1;
-    }
-    return 0;
-}
-
-int32_t cmd55(uint8_t *resp)
-{
-    uint8_t cmd_array[] = {0x40 | 55, 0, 0, 0, 0, 0xff};
-    cmd_array[1] = (card_rca >> 8) & 0xff;
-    cmd_array[2] = card_rca & 0xff;
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
-        return -1;
-    }
-    send_cmd_array(cmd_array);
-    int32_t ret = receive_response(6, resp);
-    send_clock_400k(8);
-    return ret;
-}
-
-int32_t check_crc7(uint8_t *resp, int length_of_resp) {
-    uint8_t expected_crc = crc7(resp, length_of_resp - 1);
-    uint8_t actual_crc = ((resp[length_of_resp - 1] >> 1) & 0xff);
-    if ( actual_crc != expected_crc ) {
-        printf("CRC response mismatch \n");
-        printf("Expected CRC: %x, Actual CRC: %x\n", expected_crc, actual_crc);
+        LOG("Time out. The DAT0 LINE is busy\n");
         return -1;
     }
     return 0;
@@ -392,7 +373,7 @@ void dump_R1_status(uint32_t error)
         "reserved",
         "AKE_SEQ_ERROR", "reserved", "reserved", "reserved"};
     for (int i = 0; i < 32; i++) {
-        printf("%s: %d\n", error_messages[31-i], error & 1);
+        LOG("%s: %d\n", error_messages[31-i], error & 1);
         error >>= 1;
     }
     
@@ -400,32 +381,95 @@ void dump_R1_status(uint32_t error)
 
 int32_t check_R1_response(uint8_t *resp, uint8_t cmd)
 {
-    printf("[47-40]: CMD Index          : %02x\n", resp[0]);
-    printf("[39-32]: Card status [31-24]: %02x\n", resp[1]);
-    printf("[31-24]: Card status [23-16]: %02x\n", resp[2]);
-    printf("[23-16]: Card status [15- 8]: %02x\n", resp[3]);
-    printf("[15- 8]: Card status [7 - 0]: %02x\n", resp[4]);
-    printf("[ 7- 0]: CRC + end bit: %02x\n", resp[5]);
+    LOG("[47-40]: CMD Index          : %02x\n", resp[0]);
+    LOG("[39-32]: Card status [31-24]: %02x\n", resp[1]);
+    LOG("[31-24]: Card status [23-16]: %02x\n", resp[2]);
+    LOG("[23-16]: Card status [15- 8]: %02x\n", resp[3]);
+    LOG("[15- 8]: Card status [7 - 0]: %02x\n", resp[4]);
+    LOG("[ 7- 0]: CRC + end bit: %02x\n", resp[5]);
+    int ret = 0;
     if (resp[0] != cmd) {
-        printf("CMD Index error\n");
-        return -1;
+        LOG("CMD Index error\n");
+        ret = -1;
     }
     uint32_t crc_error = check_crc7(resp, 6);
     if (crc_error) {
-        printf("CRC error.\n");
-        return -1;
+        LOG("CRC error.\n");
+        ret = -1;
     }
     uint32_t error = check_R1_error(resp);
     if (error != 0) {
-        printf("Card response error\n");
+        LOG("Card response error\n");
         dump_R1_status(error);
-        return -1;
+        ret = -1;
     }
     if ((resp[5] & 1) != 1) {
-        printf("End bit missing. resp[5]: %x\n", resp[5]);
+        LOG("End bit missing. resp[5]: %x\n", resp[5]);
+        ret = -1;
+    }
+    return ret;
+}
+
+int32_t cmd0() {
+    uint8_t cmd_array[] = {0x40, 0, 0, 0, 0, 0xff};
+    add_crc(cmd_array);
+    if (wait_for_cmd_rdy() < 0) {
+        return -1;
+    }
+    send_cmd_array(cmd_array);
+    send_clock(8);
+    return 0;
+}
+
+int32_t cmd8(uint8_t vhs,
+                   uint8_t checkpattern, uint8_t *resp)
+{
+    uint8_t cmd_array[] = {0x40 | 8, 0, 0, vhs, checkpattern, 0xff};
+    add_crc(cmd_array);
+    if (wait_for_cmd_rdy() < 0) {
+        LOG("CMD ready Timeout\n");
+        return -1;
+    }
+    send_cmd_array(cmd_array);
+    if (get_cmd_response(6, resp)) {
+        LOG("CMD response Timeout\n");
+        return -1;
+    }
+    check_crc7(resp, 6);
+    send_clock(8);
+
+    // resp[] check
+    LOG("[47-40]: CMD Index (08 expected): %02x\n", resp[0]);
+    LOG("[39-32]: RESERVED (00 expected): %02x\n", resp[1]);
+    LOG("[31-24]: RESERVED (00 expected): %02x\n", resp[2]);
+    LOG("[23-16]: Voltage Accepted (01 expected): %02x\n", resp[3]);
+    LOG("[15- 8]: Check Pattern (aa expected): %02x\n", resp[4]);
+    LOG("[ 7- 0]: CRC + end bit: %02x\n", resp[5]);
+    // check for illegal command or non-compatible card
+    if (resp[0] != 8 || resp[3] != 1 || resp[4] != 0xaa) {
+        LOG("Response error\n");
+        return -1;
+    }
+    if (check_crc7(resp, 6)) {
+        LOG("CRC error\n");
         return -1;
     }
     return 0;
+}
+
+int32_t cmd55(uint8_t *resp)
+{
+    uint8_t cmd_array[] = {0x40 | 55, 0, 0, 0, 0, 0xff};
+    cmd_array[1] = (global_card_rca >> 8) & 0xff;
+    cmd_array[2] = global_card_rca & 0xff;
+    add_crc(cmd_array);
+    if (wait_for_cmd_rdy() < 0) {
+        return -1;
+    }
+    send_cmd_array(cmd_array);
+    int32_t ret = get_cmd_response(6, resp);
+    send_clock(8);
+    return ret;
 }
 
 int32_t acmd41(uint8_t *resp)
@@ -440,23 +484,23 @@ int32_t acmd41(uint8_t *resp)
         return -1;
     }
     send_cmd_array(cmd_array);
-    int32_t ret = receive_response(6, resp);
+    int32_t ret = get_cmd_response(6, resp);
     send_clock_400k(8);
     return ret;
 }
 
 int32_t check_acmd41_response(uint8_t *resp)
 {
-    printf("[47-40]: CMD Index (0x3F expected): %02x\n", resp[0]);
-    printf("[39-32]: OCR[32-24] (0xc0 expected): %02x\n", resp[1]);
-    printf("[31-24]: OCR[23-16]: %02x\n", resp[2]);
-    printf("[23-16]: OCR[15- 8]: %02x\n", resp[3]);
-    printf("[15- 8]: OCR[7 - 0]: %02x\n", resp[4]);
-    printf("[ 7- 0]: 0xFF expected: %02x\n", resp[5]);
-    printf("Bysy bit: %X\n", (resp[1] & (1 << 7)) >> 7);
-    printf("CCS: %X\n", (resp[1] & (1 << 6)) >> 6);
-    printf("UHS-II: %X\n", (resp[1] & (1 << 5)) >> 5);
-    printf("S18A: %X\n", (resp[1] & 1));
+    LOG("[47-40]: CMD Index (0x3F expected): %02x\n", resp[0]);
+    LOG("[39-32]: OCR[32-24] (0xc0 expected): %02x\n", resp[1]);
+    LOG("[31-24]: OCR[23-16]: %02x\n", resp[2]);
+    LOG("[23-16]: OCR[15- 8]: %02x\n", resp[3]);
+    LOG("[15- 8]: OCR[7 - 0]: %02x\n", resp[4]);
+    LOG("[ 7- 0]: 0xFF expected: %02x\n", resp[5]);
+    LOG("Bysy bit: %X\n", (resp[1] & (1 << 7)) >> 7);
+    LOG("CCS: %X\n", (resp[1] & (1 << 6)) >> 6);
+    LOG("UHS-II: %X\n", (resp[1] & (1 << 5)) >> 5);
+    LOG("S18A: %X\n", (resp[1] & 1));
     if ((resp[1] & (1 << 7)) == 0) {
         return -1;
     }
@@ -471,7 +515,7 @@ int32_t cmd2(uint8_t *resp)
         return -1;
     }
     send_cmd_array(cmd_array);
-    int32_t ret = receive_response(17, resp);
+    int32_t ret = get_cmd_response(17, resp);
     send_clock_400k(8);
     return ret;
 }
@@ -479,38 +523,38 @@ int32_t cmd2(uint8_t *resp)
 int32_t check_cmd2_response(uint8_t *resp)
 {
     uint8_t name[6];
-    printf("[135:128]: CMD Index (3F expected): %02x\n", resp[0]);
-    printf("[127:120]: Card CID [127:120]: %02x\n", resp[1]);
-    printf("[119:112]: Card CID [119:112]: %02x\n", resp[2]);
-    printf("[111:104]: Card CID [111:104]: %02x\n", resp[3]);
-    printf("[103: 96]: Card CID [103: 96]: %02x\n", resp[4]);
-    printf("[ 97: 88]: Card CID [ 97: 88]: %02x\n", resp[5]);
-    printf("[ 87: 80]: Card CID [ 87: 80]: %02x\n", resp[6]);
-    printf("[ 79: 72]: Card CID [ 79: 72]: %02x\n", resp[7]);
-    printf("[ 71: 64]: Card CID [ 71: 64]: %02x\n", resp[8]);
-    printf("[ 63: 56]: Card CID [ 63: 56]: %02x\n", resp[9]);
-    printf("[ 55: 48]: Card CID [ 55: 48]: %02x\n", resp[10]);
-    printf("[ 47: 40]: Card CID [ 47: 40]: %02x\n", resp[11]);
-    printf("[ 39: 32]: Card CID [ 39: 32]: %02x\n", resp[12]);
-    printf("[ 31: 24]: Card CID [ 31: 24]: %02x\n", resp[13]);
-    printf("[ 23: 16]: Card CID [ 23: 16]: %02x\n", resp[14]);
-    printf("[ 15:  8]: Card CID [ 15:  8]: %02x\n", resp[15]);
-    printf("[  7:  0]: CRC + end bit: %02x\n", resp[16]);
+    LOG("[135:128]: CMD Index (3F expected): %02x\n", resp[0]);
+    LOG("[127:120]: Card CID [127:120]: %02x\n", resp[1]);
+    LOG("[119:112]: Card CID [119:112]: %02x\n", resp[2]);
+    LOG("[111:104]: Card CID [111:104]: %02x\n", resp[3]);
+    LOG("[103: 96]: Card CID [103: 96]: %02x\n", resp[4]);
+    LOG("[ 97: 88]: Card CID [ 97: 88]: %02x\n", resp[5]);
+    LOG("[ 87: 80]: Card CID [ 87: 80]: %02x\n", resp[6]);
+    LOG("[ 79: 72]: Card CID [ 79: 72]: %02x\n", resp[7]);
+    LOG("[ 71: 64]: Card CID [ 71: 64]: %02x\n", resp[8]);
+    LOG("[ 63: 56]: Card CID [ 63: 56]: %02x\n", resp[9]);
+    LOG("[ 55: 48]: Card CID [ 55: 48]: %02x\n", resp[10]);
+    LOG("[ 47: 40]: Card CID [ 47: 40]: %02x\n", resp[11]);
+    LOG("[ 39: 32]: Card CID [ 39: 32]: %02x\n", resp[12]);
+    LOG("[ 31: 24]: Card CID [ 31: 24]: %02x\n", resp[13]);
+    LOG("[ 23: 16]: Card CID [ 23: 16]: %02x\n", resp[14]);
+    LOG("[ 15:  8]: Card CID [ 15:  8]: %02x\n", resp[15]);
+    LOG("[  7:  0]: CRC + end bit: %02x\n", resp[16]);
 
-    printf("Manufacturer ID (MID): %d\n", resp[1]);
-    printf("OED/Applicaiton ID: %d\n", (resp[2] << 8) + resp[3]);
+    LOG("Manufacturer ID (MID): %d\n", resp[1]);
+    LOG("OED/Applicaiton ID: %d\n", (resp[2] << 8) + resp[3]);
     name[0] = resp[4];
     name[1] = resp[5];
     name[2] = resp[6];
     name[3] = resp[7];
     name[4] = resp[8];
     name[5] = 0;
-    printf("Product name: %s\n", name);
-    printf("Product revision: %d\n", resp[9] & 0x0ff );;
-    printf("Product Serial Number %d\n", (resp[10] << 24) + (resp[11] << 16)
+    LOG("Product name: %s\n", name);
+    LOG("Product revision: %d\n", resp[9] & 0x0ff );;
+    LOG("Product Serial Number %d\n", (resp[10] << 24) + (resp[11] << 16)
            + (resp[12] << 8) + (resp[13]));
-    printf("Manufacturing Data: %d\n", ((resp[14] & 0x0F) << 8) + resp[15]);
-    printf("CRC7 check sum: %d\n", resp[16] >> 1);
+    LOG("Manufacturing Data: %d\n", ((resp[14] & 0x0F) << 8) + resp[15]);
+    LOG("CRC7 check sum: %d\n", resp[16] >> 1);
     // TODO: check CRC
     return 0;
 }
@@ -523,7 +567,7 @@ int32_t cmd3(uint8_t *resp)
         return -1;
     }
     send_cmd_array(cmd_array);
-    int32_t ret = receive_response(6, resp);
+    int32_t ret = get_cmd_response(6, resp);
     send_clock_400k(8);
     return ret;
 }
@@ -531,15 +575,15 @@ int32_t cmd3(uint8_t *resp)
 
 int32_t check_cmd3_response(uint8_t *resp)
 {
-    printf("[47:40]: CMD Index (03 expected): %02x\n", resp[0]);
-    printf("[39:32]: RCA[31:16]: %02x\n", resp[1]);
-    printf("[31:24]: RCA[15: 0]: %02x\n", resp[2]);
-    printf("[23:16]: Status[15: 8]: %02x\n", resp[3]);
-    printf("[15: 8]: Status[ 7: 0]: %02x\n", resp[4]);
-    printf("[ 7: 0]: CRC + end bit: %02x\n", resp[5]);
+    LOG("[47:40]: CMD Index (03 expected): %02x\n", resp[0]);
+    LOG("[39:32]: RCA[31:16]: %02x\n", resp[1]);
+    LOG("[31:24]: RCA[15: 0]: %02x\n", resp[2]);
+    LOG("[23:16]: Status[15: 8]: %02x\n", resp[3]);
+    LOG("[15: 8]: Status[ 7: 0]: %02x\n", resp[4]);
+    LOG("[ 7: 0]: CRC + end bit: %02x\n", resp[5]);
 
-    printf("New RCA: %04x\n", (resp[1] << 8) + resp[2]);
-    printf("Status: %04x\n", (resp[3] << 8) + resp[4]);
+    LOG("New RCA: %04x\n", (resp[1] << 8) + resp[2]);
+    LOG("Status: %04x\n", (resp[3] << 8) + resp[4]);
     // resp[3] is ((x) is expectation)
     // 7: COM_CRC_ERROR (0)
     // 6: ILLEGAL_COMMAND (0)
@@ -559,46 +603,31 @@ int32_t check_cmd3_response(uint8_t *resp)
     //
     // CURRENT_STATE should be TRAN = 4
     if (resp[3] != 0b00000101 || (resp[4] & 0x08) != 0) {
-        printf("CMD3 response error\n");
+        LOG("CMD3 response error\n");
         return -1;
     }
     // TODO: check CRC
     return 0;
 }
 
-int32_t wait_for_dat_rdy() {
-    // todo: add necessary process
-    uint8_t ret = 0;
-    int32_t timeout = 1024;
-    while(ret != 0xFF & timeout-->0) {
-        ret = get_dat0_response();
-    }
-    if (ret != 0xFF) {
-        printf("Time out. The DAT0 LINE is busy\n");
-        return -1;
-    }
-    return 0;
-}
-
 int32_t cmd7(uint8_t *resp)
 {
     uint8_t cmd_array[] = {0x40 | 7, 0, 0, 0, 0, 0xff};
-    cmd_array[1] = (card_rca >> 8) & 0xff;
-    cmd_array[2] = card_rca & 0xff;
+    cmd_array[1] = (global_card_rca >> 8) & 0xff;
+    cmd_array[2] = global_card_rca & 0xff;
     add_crc(cmd_array);
     if (wait_for_cmd_rdy() < 0) {
-        printf("Card is busy before cmd\n");
         return -1;
     }
-    printf("Start sending cmd string: ");
-    printf("%2x %2x %2x %2x %2x %2x\n", cmd_array[0], cmd_array[1], cmd_array[2],
+    LOG("Start sending cmd string: ");
+    LOG("%2x %2x %2x %2x %2x %2x\n", cmd_array[0], cmd_array[1], cmd_array[2],
            cmd_array[3], cmd_array[4], cmd_array[5]);
     send_cmd_array(cmd_array);
-    printf("Wait for response\n");
-    int32_t ret = receive_response(6, resp);
-    printf("Wait for busy signal to end\n");
+    LOG("Wait for response\n");
+    int32_t ret = get_cmd_response(6, resp);
+    LOG("Wait for busy signal to end\n");
     if (wait_for_dat_rdy() < 0) {
-        printf("Card is busy after cmd and timed out.\n");
+        LOG("Card is busy after cmd and timed out.\n");
         return -1;
     }
     send_clock_400k(8);
@@ -614,7 +643,7 @@ int32_t acmd6(uint8_t *resp)
         return -1;
     }
     send_cmd_array(cmd_array);
-    int32_t ret = receive_response(6, resp);
+    int32_t ret = get_cmd_response(6, resp);
     send_clock_400k(8);
     return ret;
 }
@@ -631,27 +660,12 @@ int32_t cmd23(uint32_t block_count, uint8_t *resp)
         return -1;
     }
     send_cmd_array(cmd_array);
-    int32_t ret = receive_response(6, resp);
+    int32_t ret = get_cmd_response(6, resp);
     if (ret < 0) {
-        printf("Block count set fail\n");
+        LOG("Block count set fail\n");
     }
     
     send_clock(8);
-    return ret;
-}
-
-// get command response and data response
-uint8_t get_cmd_1bit_data(uint8_t *dat) {
-    uint8_t ret;
-    uint8_t dat_read;
-    clk_high_25M();
-    ret = gpioRead(SD_CMD);
-    dat_read  = gpioRead(SD_DA3) << 3;
-    dat_read |= gpioRead(SD_DA2) << 2;
-    dat_read |= gpioRead(SD_DA1) << 1;
-    dat_read |= gpioRead(SD_DA0);
-    clk_low_25M();
-    *dat = dat_read;
     return ret;
 }
 
@@ -667,7 +681,7 @@ int32_t read_data(uint8_t *resp, int32_t block_length, uint8_t *rwbuffer)
     int32_t timeout_limit = 25000000 / 10 * 10;
     // time out is 100 ms. Assuming 25M Hz, timeout cycle is 25000000/10
     // *10 is for just in case
-    if (clk_mode == 0) {
+    if (global_clk_mode == 0) {
       timeout_limit = 400000 / 10 * 10;
     // time out is 100 ms. Assuming 400K Hz, timeout cycle is 400000/10
     // *10 is for just in case
@@ -675,7 +689,7 @@ int32_t read_data(uint8_t *resp, int32_t block_length, uint8_t *rwbuffer)
     int32_t timeout_cnt = 0;
     while(response_cnt < 48 || data_cnt < block_length * 8 + 16) {
         uint8_t dat;
-        uint8_t ret = get_cmd_1bit_data(&dat);
+        uint8_t ret = get_cmd_and_dat_4bit(&dat);
         if (ret == 0 && response_cnt == -1) {
             response_cnt = 0;
         }
@@ -709,10 +723,10 @@ int32_t read_data(uint8_t *resp, int32_t block_length, uint8_t *rwbuffer)
         }
         // TOTO (moizumi): check crc
         if (++timeout_cnt > timeout_limit) {
-            printf("Data read timeout\n");
-            printf("response_cnt: %d\n", response_cnt);
-            printf("data_cnt: %d\n", data_cnt);
-            printf("byte_cnt: %d\n", byte_cnt);
+            LOG("Data read timeout\n");
+            LOG("response_cnt: %d\n", response_cnt);
+            LOG("data_cnt: %d\n", data_cnt);
+            LOG("byte_cnt: %d\n", byte_cnt);
             break;
         }
     }
@@ -744,7 +758,7 @@ int32_t read_data_blocks(uint32_t block_counts, uint8_t *resp, uint8_t *rwbuffer
     uint32_t crc_cnt;
     while(cmd_state != 10 || dat_state != 10) {
         uint8_t dat;
-        uint8_t ret = get_cmd_1bit_data(&dat);
+        uint8_t ret = get_cmd_and_dat_4bit(&dat);
         // cmd_sequence
         switch(cmd_state) {
         uint32_t byte_pos, shift_cnt;
@@ -768,43 +782,6 @@ int32_t read_data_blocks(uint32_t block_counts, uint8_t *resp, uint8_t *rwbuffer
                 cmd_state = 10;
             }
             break;
-        /* case 3: // wait for the last block */
-        /*     if (block_cnt == block_counts) { */
-        /*         set_cmd_output(); */
-        /*         cmd_state = 4; */
-        /*     } */
-        /*     break; */
-        /* case 4: // send stop cmd */
-        /*     if (cmd_cnt < 48) { */
-        /*         uint8_t c = cmd_array[cmd_cnt >> 3]; */
-        /*         uint8_t mask = 1 << (7 - (cmd_cnt & 0x07)); */
-        /*         card_cmd_1bit(c & mask); */
-        /*         cmd_cnt ++; */
-        /*     } else { */
-        /*         response_cnt = 0; */
-        /*         card_cmd_1bit(1); */
-        /*         set_cmd_input(); */
-        /*         timeout_cnt = 0; */
-        /*         cmd_state = 5; */
-        /*     } */
-        /*     break; */
-        /* case 5: // wait for response */
-        /*     if (ret == 0) { */
-        /*         response_cnt = 1; */
-        /*         cmd_state = 6; */
-        /*         timeout_cnt = 0; */
-        /*     } */
-        /*     break; */
-        /* case 6: // response */
-        /*     byte_pos =  response_cnt >> 3; */
-        /*     shift_cnt = response_cnt & 0x07; */
-        /*     resp[byte_pos] |= (ret << (7 - shift_cnt)); */
-        /*     response_cnt++; */
-        /*     if (response_cnt == 48) { */
-        /*         // todo: check response */
-        /*         cmd_state = 10; */
-        /*     } */
-        /*     break; */
         }
         // data path sate machine
         switch(dat_state) {
@@ -841,7 +818,7 @@ int32_t read_data_blocks(uint32_t block_counts, uint8_t *resp, uint8_t *rwbuffer
             break;
         case 3: // check stop bit
             if (dat != 0x0f) {
-                printf("Data stop bit is not right: %x\n", dat);
+                LOG("Data stop bit is not right: %x\n", dat);
                 goto error;
             }
             block_cnt++;
@@ -853,75 +830,98 @@ int32_t read_data_blocks(uint32_t block_counts, uint8_t *resp, uint8_t *rwbuffer
         }
         // TOTO (moizumi): check crc
         if (++timeout_cnt > timeout_limit) {
-            printf("SD CARD multiple blocks read Time out\n");
+            LOG("SD CARD multiple blocks read Time out\n");
             goto error;
         }
     }
     return (buffer_cnt >> 3);
  error:
-    printf("response_cnt: %d\n", response_cnt);
-    printf("block_cnt: %d\n", block_cnt);
-    printf("data_cnt: %d\n", data_cnt);
-    printf("buffer_cnt: %d\n", buffer_cnt);
+    LOG("response_cnt: %d\n", response_cnt);
+    LOG("block_cnt: %d\n", block_cnt);
+    LOG("data_cnt: %d\n", data_cnt);
+    LOG("buffer_cnt: %d\n", buffer_cnt);
     return -1;
 }
-
-int32_t cmd17(uint32_t address, uint8_t *resp, uint8_t *rwbuffer)
-{
-    uint8_t cmd_array[] = {0x40 | 17, 0, 0, 0, 0, 0xff};
-    cmd_array[1] = (address >> 24) & 0xFF;
-    cmd_array[2] = (address >> 16) & 0xFF;
-    cmd_array[3] = (address >> 8) & 0xFF;
-    cmd_array[4] = address & 0xFF;
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
-        return -1;
-    }
-    send_cmd_array(cmd_array);
-    uint32_t data_cnt = read_data(resp, 512, rwbuffer);
-
-    send_clock(8);
-    
-    return data_cnt;
-}
-
 
 int32_t cmd12(uint8_t *resp)
 {
     uint8_t cmd_array[] = {0x40 | 12, 0, 0, 0, 0, 0xff};
     add_crc(cmd_array);
     if (wait_for_cmd_rdy() < 0) {
-        printf("Card is busy before cmd\n");
         return -1;
     }
-    printf("Start sending cmd string: ");
+    LOG("Start sending cmd string: ");
     send_cmd_array(cmd_array);
-    printf("Wait for response\n");
-    int32_t ret = receive_response(6, resp);
-    printf("Wait for busy signal to end\n");
+    LOG("Wait for response\n");
+    int32_t ret = get_cmd_response(6, resp);
+    LOG("Wait for busy signal to end\n");
     if (wait_for_dat_rdy() < 0) {
-        printf("Card is busy after cmd and timed out.\n");
+        LOG("Card is busy after cmd and timed out.\n");
         return -1;
     }
     send_clock(8);
     return ret;
 }
 
-
-int32_t cmd18(uint32_t address, uint32_t block_counts, uint8_t *resp, uint8_t *rwbuffer)
-{
-    uint8_t cmd_array[] = {0x40 | 18, 0, 0, 0, 0, 0xff};
+void set_address_to_cmd_array(int cmd, uint32_t address, uint8_t *cmd_array) {
+    cmd_array[0] = 0x40 | cmd;
     cmd_array[1] = (address >> 24) & 0xFF;
     cmd_array[2] = (address >> 16) & 0xFF;
     cmd_array[3] = (address >> 8) & 0xFF;
     cmd_array[4] = address & 0xFF;
     add_crc(cmd_array);
+}
+
+int32_t cmd18_17(int cmd, uint32_t address, uint32_t block_counts, uint8_t *resp, uint8_t *rwbuffer)
+{
+    uint8_t cmd_array[6];
+    set_address_to_cmd_array(cmd, address, cmd_array);
     if (wait_for_cmd_rdy() < 0) {
-        printf("CMD18 issue time out\n");
         return -1;
     }
+    
     send_cmd_array(cmd_array);
     int32_t data_cnt = read_data_blocks(block_counts, resp, rwbuffer);
+    if (check_R1_response(resp, cmd) < 0) {
+        return -1;
+    }
+    send_clock(8);
+    
+    return data_cnt;
+}
+
+int32_t cmd17(uint32_t address, uint8_t *resp, uint8_t *rwbuffer) {
+    const int cmd = 17;
+    uint8_t cmd_array[6];
+    set_address_to_cmd_array(cmd, address, cmd_array);
+    if (wait_for_cmd_rdy() < 0) {
+        return -1;
+    }
+    
+    send_cmd_array(cmd_array);
+    int32_t data_cnt = read_data(resp, 512, rwbuffer);
+    if (check_R1_response(resp, cmd) < 0) {
+        return -1;
+    }
+    send_clock(8);
+    
+    return data_cnt;
+}
+
+int32_t cmd18(uint32_t address, uint32_t block_counts, uint8_t *resp, uint8_t *rwbuffer) {
+    const int cmd = 18;
+    uint8_t cmd_array[6];
+    set_address_to_cmd_array(cmd, address, cmd_array);
+    if (wait_for_cmd_rdy() < 0) {
+        return -1;
+    }
+    
+    send_cmd_array(cmd_array);
+    int32_t data_cnt = read_data_blocks(block_counts, resp, rwbuffer);
+    if (check_R1_response(resp, cmd) < 0) {
+        return -1;
+    }
+    send_clock(8);
     
     return data_cnt;
 }
@@ -942,16 +942,15 @@ int32_t cmd6(uint8_t function_group, uint8_t function, uint8_t *resp, uint8_t *r
     cmd_array[1] = 0x80; // switch function
     add_crc(cmd_array);
     if (wait_for_cmd_rdy() < 0) {
-        printf("Command wait ready time out\n");
         return -1;
     }
-    printf("Send cmd6 command\n");
+    LOG("Send cmd6 command\n");
     send_cmd_array(cmd_array);
     
-    printf("Read sd card status\n");
+    LOG("Read sd card status\n");
     // SD CARD status is 512 bits
     int32_t data_cnt = read_data(resp, 64, rwbuffer);
-    send_clock_25M(8);
+    send_clock(8);
     
     return data_cnt;
 }
@@ -962,32 +961,21 @@ int32_t acmd51(uint8_t *resp, uint8_t *buffer)
     uint8_t cmd_array[] = {0x40 | 51, 0, 0, 0, 0, 0xff};
     add_crc(cmd_array);
     if (wait_for_cmd_rdy() < 0) {
-        printf("Command wait ready time out\n");
         return -1;
     }
-    printf("Send command\n");
+    LOG("Send command\n");
     send_cmd_array(cmd_array);
     
-    printf("Read data\n");
+    LOG("Read data\n");
     // SCR status is 64 bits
     int32_t data_cnt = read_data(resp, 64 / 8, buffer);
-    send_clock_25M(8);
+    send_clock(8);
     
     return data_cnt;
 }
 
-uint16_t crc16_update(uint16_t crc, uint8_t new_bit)
-{
-    new_bit ^= ((crc >> 15) & 1);
-    crc <<= 1;
-    if (new_bit) {
-        crc ^= 0x1021;
-    }
-    return crc;
-}
-
 // send data to data bus
-void card_data_4bit(uint8_t dat)
+void send_data_to_bus(uint8_t dat)
 {
     enum PIN_NUMBER dat_pin[] = {SD_DA0, SD_DA1, SD_DA2, SD_DA3};
     for (int pos = 0; pos < 4; pos++) {
@@ -998,18 +986,8 @@ void card_data_4bit(uint8_t dat)
         }
         dat >>= 1;
     }
-}
-
-void send_data_to_bus(uint8_t dat)
-{
-    card_data_4bit(dat);
-    if (clk_mode == 0) {
-        clk_high_400k();
-        clk_low_400k();
-    } else {
-        clk_high_25M();
-        clk_low_25M();
-    }
+    clk_high();
+    clk_low();
 }
 
 int32_t write_data(int32_t bytes_in_block, const uint8_t *rwbuffer)
@@ -1018,7 +996,7 @@ int32_t write_data(int32_t bytes_in_block, const uint8_t *rwbuffer)
     int32_t byte_cnt = 0;
     int32_t timeout_limit = 25000000 / 10;
     // time out is 100 ms. Assuming 25MHz, timeout cycle is 25000000/10
-    set_data_output();
+    set_data_direction_output();
     // send start bit
     send_data_to_bus(START_BIT);
     for (int data_cnt = 0; data_cnt < bytes_in_block * 2; data_cnt++) {
@@ -1053,7 +1031,7 @@ int32_t write_data(int32_t bytes_in_block, const uint8_t *rwbuffer)
     }
     // send stop bit at the end of CRC
     send_data_to_bus(STOP_BIT);
-    set_data_input();
+    set_data_direction_input();
 
     uint8_t ret = 0;
     for (int i = 0; i < 6; i++) {
@@ -1062,80 +1040,74 @@ int32_t write_data(int32_t bytes_in_block, const uint8_t *rwbuffer)
     if ((ret & 0x0F) != 0b00101) {
         goto RESPONSE_ERROR;
     }
-    printf("CRC Response Good\n");
+    LOG("CRC Response Good\n");
     // wait for busy (dat0 == 0) to end
     if (wait_for_dat_rdy() < 0) {
-        printf("Command wait ready time out\n");
+        LOG("Command wait ready time out\n");
         goto WRITE_BUSY_ERROR;
     }
     return byte_cnt;
 
  RESPONSE_ERROR:
     if ((ret & 0x0F) == 0b01011) {
-        printf("Write CRC response error %x\n", ret);
+        LOG("Write CRC response error %x\n", ret);
         return -1;
     } else if ((ret & 0x0F) == 0b01101) {
-        printf("Write rejected error %x\n", ret);
+        LOG("Write rejected error %x\n", ret);
         return -1;
     } 
-    printf("CRC Data response token is unknown %x\n", ret);
+    LOG("CRC Data response token is unknown %x\n", ret);
     return -1;
  WRITE_BUSY_ERROR:
-    printf("Write busy signal time out error\n");
+    LOG("Write busy signal time out error\n");
     return -1;
 }
 
 // Single write command
 int32_t cmd24(uint32_t address, uint8_t *resp, const uint8_t *rwbuffer)
 {
-    uint8_t cmd_array[] = {0x40 | 24, 0, 0, 0, 0, 0xff};
-    cmd_array[1] = (address >> 24) & 0xFF;
-    cmd_array[2] = (address >> 16) & 0xFF;
-    cmd_array[3] = (address >> 8) & 0xFF;
-    cmd_array[4] = address & 0xFF;
-    add_crc(cmd_array);
+    int cmd = 24;
+    uint8_t cmd_array[6];
+    set_address_to_cmd_array(cmd, address, cmd_array);
     if (wait_for_cmd_rdy() < 0) {
         return -1;
     }
     send_cmd_array(cmd_array);
-    if (receive_response(6, resp))
-        goto RESPONSE_TIME_OUT_ERROR;
+    if (get_cmd_response(6, resp)) {
+        return -1;
+    }
+    if (check_R1_response(resp, cmd)) {
+        return -1;
+    }
     return 0;
-    
-RESPONSE_TIME_OUT_ERROR:
-    printf("RESPONSE timeout error\n");
-    return -1;
 }
 
 // TODO refactor cmd24 and cmd25 (both are almost same)
 // WRITE_MULTIPLE_BLOCK command
 int32_t cmd25(uint32_t address, uint8_t *resp, const uint8_t *rwbuffer)
 {
-    const int CMD = 25;
-    uint8_t cmd_array[] = {0x40 | CMD, 0, 0, 0, 0, 0xff};
-    cmd_array[1] = (address >> 24) & 0xFF;
-    cmd_array[2] = (address >> 16) & 0xFF;
-    cmd_array[3] = (address >> 8) & 0xFF;
-    cmd_array[4] = address & 0xFF;
-    add_crc(cmd_array);
+    int cmd = 25;
+    uint8_t cmd_array[6];
+    set_address_to_cmd_array(cmd, address, cmd_array);
     if (wait_for_cmd_rdy() < 0) {
         return -1;
     }
     send_cmd_array(cmd_array);
-    if (receive_response(6, resp))
-        goto RESPONSE_TIME_OUT_ERROR;
+    if (get_cmd_response(6, resp)) {
+        return -1;
+    }
+    if (check_R1_response(resp, cmd)) {
+        return -1;
+    }
     return 0;
-    
-RESPONSE_TIME_OUT_ERROR:
-    printf("RESPONSE timeout error\n");
-    return -1;
 }
 
 void set_rca(uint8_t *resp)
 {
-    card_rca = ((resp[1] << 8) + resp[2]) & 0xFFFF;
+    global_card_rca = ((resp[1] << 8) + resp[2]) & 0xFFFF;
 }
 
+// SD CARD Level control commands
 
 // Initialization of GPIO for SD CARD
 void sdInitInterface()
@@ -1183,19 +1155,16 @@ uint8_t sdInitCard()
     // dummy clock (>74) is needed after startup 
     send_clock_400k(80);
     // reset
-    printf("CMD0 start\n");
+    LOG("CMD0 start\n");
     cmd0();
 
-    printf("CMD8 start\n");
+    LOG("CMD8 start\n");
     if (cmd8(0x01, 0xaa, resp) < 0) {
         goto timeout;
     }
-    if (check_cmd8_response(resp) < 0) {
-        goto error;
-    }
 
     while (true) {
-        printf("CMD55 start\n");
+        LOG("CMD55 start\n");
         if (cmd55(resp) < 0) {
             goto timeout;
         }
@@ -1203,22 +1172,22 @@ uint8_t sdInitCard()
             goto error;
         }
         if ((resp[4] & 0x020) == 0) {
-            printf("Not ready for ACMD\n");
+            LOG("Not ready for ACMD\n");
             continue;
         }
         
-        printf("ACMD41 start\n");
+        LOG("ACMD41 start\n");
         if (acmd41(resp) < 0) {
             goto timeout;
         }
         if (check_acmd41_response(resp) == 0) {
-            printf("The SD Card is ready\n");
+            LOG("The SD Card is ready\n");
             break;
         }
-        printf("Error: CMD41 Error. Not Ready. Retry\n");
+        LOG("Error: CMD41 Error. Not Ready. Retry\n");
         waitMicro(1000000);
     }
-    printf("CMD2 start\n");
+    LOG("CMD2 start\n");
     if (cmd2(resp) < 0) {
         goto timeout;
     }
@@ -1226,7 +1195,7 @@ uint8_t sdInitCard()
         goto error;
     }
     
-    printf("CMD3 start\n");
+    LOG("CMD3 start\n");
     if (cmd3(resp) < 0) {
         goto timeout;
     }
@@ -1234,9 +1203,9 @@ uint8_t sdInitCard()
         goto error;
     }
     set_rca(resp);
-    printf("card_rca: %4x\n", card_rca);
+    LOG("card_rca: %4x\n", global_card_rca);
 
-    printf("CMD7 start\n");
+    LOG("CMD7 start\n");
     if (cmd7(resp) < 0) {
         goto timeout;
     }
@@ -1244,34 +1213,34 @@ uint8_t sdInitCard()
         goto error;
     }
     if (((resp[3] >> 1) & 0x0F) != 3) {
-        printf("Card is not in STBY (3) status but in %d\n", ((resp[3] >> 1) & 0x0F));
+        LOG("Card is not in STBY (3) status but in %d\n", ((resp[3] >> 1) & 0x0F));
         goto error;
     }
 
-    printf("Switch to wide bus mode\n");
-    printf("CMD55 start\n");
+    LOG("Switch to wide bus mode\n");
+    LOG("CMD55 start\n");
     if (cmd55(resp) < 0) {
         goto timeout;
     }
     if (check_R1_response(resp, 55) < 0) {
         goto error;
     }
-    printf("ACMD6 start\n");
+    LOG("ACMD6 start\n");
     if (acmd6(resp) < 0) {
         goto timeout;
     }
     if (check_R1_response(resp, 6) < 0) {
         goto error;
     }
-    printf("Bus is switched to wide bus (4 bit) mode\n");
+    LOG("Bus is switched to wide bus (4 bit) mode\n");
     
     return 0;
 
  timeout:
-    printf("Command time out\n");
+    LOG("Command time out\n");
     
  error:
-    printf("Error\n");
+    LOG("Error\n");
     return -1;
 }
 
@@ -1282,7 +1251,7 @@ int32_t sdHighSpeedMode()
     int32_t length = cmd6(0, 1, resp, buffer);
     // SD CARD status is 512 bits = 64 bytes
     if (length != 64) {
-        printf("CMD6 failed %d\n", length);
+        LOG("CMD6 failed %d\n", length);
         return -1;
     }
     dump(buffer, 64);
@@ -1294,24 +1263,24 @@ int32_t sdCheckSCR()
     uint8_t resp[6];
     uint8_t buffer[1024];
     if (cmd55(resp) < 0) {
-        printf("CMD55 failed\n");
+        LOG("CMD55 failed\n");
         return -1;
     }
     if (check_R1_response(resp, 55) < 0) {
-        printf("CMD55 response error\n");
+        LOG("CMD55 response error\n");
         return -1;
     }
     int32_t length = acmd51(resp, buffer);
     // SCR is 64 bit = 8 bytes
     if (length < 8) {
-        printf("ACMD51 returned short SCR\n");
+        LOG("ACMD51 returned short SCR\n");
         return -1;
     }
     dump(buffer, 8);
-    printf("SCR Structure: %2x\n", (buffer[0] >> 4) & 0x0F);
-    printf("Spec Version: %2x\n", (buffer[0] & 0x0f));
-    printf("DAT Bus Width Support: %2x\n", buffer[1] & 0x0f);
-    printf("Set Block Count command (CMD23) Support: %2x\n", (buffer[4] >> 1) & 1);
+    LOG("SCR Structure: %2x\n", (buffer[0] >> 4) & 0x0F);
+    LOG("Spec Version: %2x\n", (buffer[0] & 0x0f));
+    LOG("DAT Bus Width Support: %2x\n", buffer[1] & 0x0f);
+    LOG("Set Block Count command (CMD23) Support: %2x\n", (buffer[4] >> 1) & 1);
     return 0;
 }
 
@@ -1321,9 +1290,9 @@ int32_t sdRead( uint32_t address , uint8_t *buffer)
 {
     uint8_t resp[6];
     uint32_t ret;
-    clk_mode = 1;
+    global_clk_mode = 1;
     ret = cmd17(address, resp, buffer);
-    clk_mode = 0;
+    global_clk_mode = 0;
     return ret;
 }
 
@@ -1331,24 +1300,21 @@ int32_t sdReadMulti( uint32_t address, uint32_t block_count, uint8_t *buffer)
 {
     uint8_t resp[6];
     int32_t ret;
-    clk_mode = 1;
+    global_clk_mode = 1;
     ret = cmd18(address, block_count, resp, buffer);
     if (ret < 0) {
-        printf("CMD18 command time out\n");
-    }
-    if (check_R1_response(resp, 18) < 0) {
-        printf("CMD18 response error\n");
+        LOG("CMD18 command time out\n");
     }
  error:
     if (cmd12(resp) < 0) {
-        printf("CMD12 command time out\n");
+        LOG("CMD12 command time out\n");
         goto exit;
     }
     if (check_R1_response(resp, 12) < 0) {
-        printf("CMD12 response error\n");
+        LOG("CMD12 response error\n");
     }
  exit:
-    clk_mode = 0;
+    global_clk_mode = 0;
     return ret;
 }
 
@@ -1357,28 +1323,24 @@ int32_t sdWrite(uint32_t address, const uint8_t *buffer)
 {
     uint8_t resp[6];
     uint32_t ret;
-    clk_mode = 1;
+    global_clk_mode = 1;
     if (cmd24(address, resp, buffer)) {
-        printf("CMD24 timeout error\n");
-        goto ERROR;
-    }
-    if (check_R1_response(resp, 24)) {
-        printf("Response error\n");
+        LOG("CMD24 timeout error\n");
         goto ERROR;
     }
     
     uint32_t data_cnt = write_data(512, buffer);
     send_clock(8);
-    clk_mode = 0;
+    global_clk_mode = 0;
     return data_cnt;
     
  ERROR:
     if (cmd12(resp) < 0) {
-        printf("CMD12 command time out\n");
+        LOG("CMD12 command time out\n");
         return -1;
     }
     if (check_R1_response(resp, 12) < 0) {
-        printf("CMD12 response error\n");
+        LOG("CMD12 response error\n");
         return -1;
     }
     return -1;
@@ -1389,13 +1351,9 @@ int32_t sdWriteMulti( uint32_t address, uint32_t num_blocks, const uint8_t *buff
 {
     uint8_t resp[6];
     uint32_t ret;
-    clk_mode = 1;
+    global_clk_mode = 1;
     if (cmd25(address, resp, buffer)) {
-        printf("CMD25 timeout\n");
-        goto EXIT;
-    }
-    if (check_R1_response(resp, 25)) {
-        printf("CMD25 Response error\n");
+        LOG("CMD25 error\n");
         goto EXIT;
     }
 
@@ -1405,7 +1363,7 @@ int32_t sdWriteMulti( uint32_t address, uint32_t num_blocks, const uint8_t *buff
         total_data_cnt += data_cnt;
         if (data_cnt < 512) {
             // something wrong with transfer
-            printf("Blcok number #%d transfer bytes = %d"
+            LOG("Blcok number #%d transfer bytes = %d"
                    "(512 expected). Abort.\n", block_cnt, data_cnt);
             goto EXIT;
         }
@@ -1413,15 +1371,15 @@ int32_t sdWriteMulti( uint32_t address, uint32_t num_blocks, const uint8_t *buff
     
  EXIT:
     if (cmd12(resp) < 0) {
-        printf("CMD12 command time out\n");
+        LOG("CMD12 command time out\n");
         return -1;
     }
     if (check_R1_response(resp, 12) < 0) {
-        printf("CMD12 response error\n");
+        LOG("CMD12 response error\n");
         return -1;
     }
     send_clock(8);
-    clk_mode = 0;
+    global_clk_mode = 0;
     return total_data_cnt;
 }
 
@@ -1429,25 +1387,22 @@ int32_t sdTransferBlocks( int64_t address, int32_t numBlocks, uint8_t* buffer, i
     uint32_t ret;
     const uint32_t block_size = 512;
     
-    if (write) {
-        printf("Error: write is not supported yet\n");
-        return -1;
-    }
     if (numBlocks == 1) {
         if (write == 0) {
             ret = sdRead(address/512, buffer);
         } else {
-            /* ret = sdWrite(address/512, buffer); */
+            ret = sdWrite(address/512, (const uint8_t*) buffer);
         }
     } else {
         if (write == 0) {
             ret = sdReadMulti(address/512, numBlocks, buffer);
         } else {
-            /* ret = sdWriteBlocks(address/512, numBlocks, buffer); */
+            ret = sdWriteMulti(address/512, numBlocks, (const uint8_t*) buffer);
         }
     }
     if (ret != numBlocks * block_size) {
-        printf("Number of read byte size (%d) is smaller than target (%d * %d = %d)\n", ret, numBlocks, block_size, numBlocks * block_size);
+        LOG("Number of read byte size (%d) is smaller than target (%d * %d = %d)\n",
+            ret, numBlocks, block_size, numBlocks * block_size);
         return -1;
     }
     return 0;

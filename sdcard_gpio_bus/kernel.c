@@ -205,7 +205,6 @@ void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
     init_filesystem();
 
     printf("Showing the root folder contents\n");
-    printf("(This may take a few minutes)\n");
     cmd_dir();
 
  demo_end:

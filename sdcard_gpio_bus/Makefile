@@ -1,3 +1,5 @@
+# uncomment this line to use DEBUG feature (LOG())
+DEBUG = -DDEBUG
 COMMON = ../project_common
 ASRCS = $(COMMON)/boot.S
 SRCS1 = kernel.c sdcard.c file.c
@@ -12,7 +14,7 @@ ARCH = armv6zk
 ISA = ARM6v2
 CPU = arm1176jzf-s
 CC = arm-none-eabi-gcc
-CFLAG =  -O0 -g -gdwarf-2 -march=$(ARCH) -mtune=$(CPU) -s -nostdlib -nostartfiles -ffreestanding -c -fno-builtin -DDEBUG
+CFLAG =  -O0 -g -gdwarf-2 -march=$(ARCH) -mtune=$(CPU) -s -nostdlib -nostartfiles -ffreestanding -c -fno-builtin $(DEBUG)
 CFLAG2 =  -std=gnu99
 INCLUDE = -I $(COMMON)
 ASM = arm-none-eabi-gcc
