@@ -4,8 +4,7 @@
 #include "stdint.h"
 #include "mylib.h"
 
-static
-DSTATUS Stat = STA_NOINIT;	/* Disk status */
+static DSTATUS Stat = STA_NOINIT;	/* Disk status */
 
 /*--------------------------------------------------------------------------
 
@@ -18,26 +17,25 @@ DSTATUS Stat = STA_NOINIT;	/* Disk status */
 /* Get Disk Status                                                       */
 /*-----------------------------------------------------------------------*/
 
-DSTATUS disk_status (
-	BYTE drv			/* Drive number (always 0) */
-)
-{
-	if (drv) return STA_NOINIT;
-
+DSTATUS disk_status(
+                    BYTE drv			/* Drive number (always 0) */
+                    ) {
+    if (drv) return STA_NOINIT;
+    
 	return Stat;
 }
 
 
 
 DSTATUS disk_initialize (
-	BYTE drv		/* Physical drive nmuber (0) */
-)
+                         BYTE drv		/* Physical drive nmuber (0) */
+                         )
 {
 	BYTE n, ty, cmd, buf[4];
 	UINT tmr;
 	DSTATUS s;
-
-
+    
+    
 	if (drv != 0) {
         return RES_NOTRDY;
     }
@@ -81,7 +79,7 @@ DRESULT disk_read (
 	if (disk_status(drv) & STA_NOINIT) {
         return RES_NOTRDY;
     }
-    int64_t address = sector *= 512; // sdTransferBlocks takes byte address
+    int64_t address = sector * 512; // sdTransferBlocks takes byte address
     
     int32_t result = sdTransferBlocks(address, count, buff, SDREAD);
 
@@ -97,26 +95,25 @@ DRESULT disk_read (
 /*-----------------------------------------------------------------------*/
 
 DRESULT disk_write (
-	BYTE drv,			/* Physical drive nmuber (0) */
-	const BYTE *buff,	/* Pointer to the data to be written */
-	DWORD sector,		/* Start sector number (LBA) */
-	UINT count			/* Sector count (1..128) */
-)
+                    BYTE drv,			/* Physical drive nmuber (0) */
+                    const BYTE *buff,	/* Pointer to the data to be written */
+                    DWORD sector,		/* Start sector number (LBA) */
+                    UINT count			/* Sector count (1..128) */
+                    )
 {
 	if (disk_status(drv) & STA_NOINIT) {
         return RES_NOTRDY;
     }
-
-    /* int64_t address = sector *= 512; // sdTransferBlocks takes byte address */
     
-    /* int32_t result = sdTransferBlocks(address, count, buff, SDWRITE); */
+    int64_t address = sector; // sdWrite takes sector address */
+    
+    int32_t result = sdWriteMulti(address, count, buff);
 
-    /* if (result) { */
-    /*     return RES_ERROR; */
-    /* } else { */
-    /*     return RES_OK; */
-    /* } */
-    return RES_PARERR;
+    if (result != 512 * count) {
+        return RES_ERROR;
+    } else {
+        return RES_OK;
+    }
 }
 
 

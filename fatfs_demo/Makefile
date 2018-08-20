@@ -1,9 +1,10 @@
+#DFLAG = -DDEBUG
 COMMON = ../project_common
 ASRCS = $(COMMON)/boot.S
 SRCS1 = kernel.c sdcard.c diskio.c
 SRCS2 = $(COMMON)/uart.c $(COMMON)/gpio.c
 SRCS3 = $(COMMON)/mylib.c
-SRCS4 = ff.c 
+SRCS4 = ff.c ffunicode.c
 AOBJS := $(ASRCS:$(COMMON)/%.S=%.o)
 OBJS1 := $(SRCS1:%.c=%.o)
 OBJS2 := $(SRCS2:$(COMMON)/%.c=%.o)
@@ -14,7 +15,7 @@ ARCH = armv6zk
 ISA = ARM6v2
 CPU = arm1176jzf-s
 CC = arm-none-eabi-gcc
-CFLAG =  -O0 -g -gdwarf-2 -march=$(ARCH) -mtune=$(CPU) -s -nostdlib -nostartfiles -ffreestanding -c -fno-builtin -DDEBUG
+CFLAG =  -O0 -g -gdwarf-2 -march=$(ARCH) -mtune=$(CPU) -s -nostdlib -nostartfiles -ffreestanding -c -fno-builtin $(DFLAG)
 CFLAG2 = -std=gnu99
 CFLAG4 = -std=gnu89
 INCLUDE = -I $(COMMON)

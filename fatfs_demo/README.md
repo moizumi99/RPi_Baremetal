@@ -3,6 +3,7 @@ The following files in this directory follow the license policies of FatFS libra
 
 - ff.c
 - ff.h
+- ffunicode.c
 
 The remaining files follow the license of the top directory.
 
