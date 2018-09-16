@@ -1,10 +1,10 @@
 #DFLAG = -DDEBUG
 COMMON = ../project_common
 ASRCS = $(COMMON)/boot.S
-SRCS1 = kernel.c sdcard.c diskio.c
+SRCS1 = main.c sdcard.c diskio.c
 SRCS2 = $(COMMON)/uart.c $(COMMON)/gpio.c
 SRCS3 = $(COMMON)/mylib.c
-SRCS4 = ff.c ffunicode.c
+SRCS4 = ff.c ffunicode.c xprintf.c
 AOBJS := $(ASRCS:$(COMMON)/%.S=%.o)
 OBJS1 := $(SRCS1:%.c=%.o)
 OBJS2 := $(SRCS2:$(COMMON)/%.c=%.o)
@@ -55,8 +55,13 @@ $(OBJS4): %.o: %.c
 	$(CC) $(CFLAG) $(CFAG4) $(INCLUDE) $< -o $@
 
 .PHONY:clean
-clean:
+clean: 
 	rm -f *.o
 	rm -f *.elf
 	rm -f *.img
 	rm -f *~
+
+.PHONY:allclean
+allclean: 
+	make clean
+	make all

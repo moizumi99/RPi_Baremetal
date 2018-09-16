@@ -84,8 +84,10 @@ void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
     }
 
     // Write demo
+    char write_text[] = "This is a write test file.\n If you are reading this, write test and read back is success\n";
+    int length = strlen(write_text);
 	if (f_open(&Fil, "testfile.txt", FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {	/* Create a file */
-		f_write(&Fil, "It works!\r\n", 11, &bw);	/* Write data to the file */
+		f_write(&Fil, write_text, length, &bw);	/* Write data to the file */
 		f_close(&Fil);								/* Close the file */
     }    
     if (bw == 11) {

@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+// Check the sdcard status. Returns zero is readable
+uint8_t sdStatus();
+uint8_t sdGetCSDRegister(uint8_t *resp);
+    
 // Initialization of GPIO for SD CARD
 void sdInitInterface();
 
@@ -22,5 +26,7 @@ int32_t sdWriteMulti( uint32_t address, uint32_t num_blocks, const uint8_t *buff
 int32_t sdRead( uint32_t address, uint8_t *buffer );
 int32_t sdReadMulti( uint32_t address, uint32_t block_length, uint8_t *buffer );
 
+#define SDREAD 0
+#define SDWRITE 1
 
 #endif  // SDCARD_H

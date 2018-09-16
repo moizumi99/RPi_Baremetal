@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include "mylib.h"
 #include "uart.h"
 #include "mmio.h"
@@ -88,7 +89,17 @@ int strncmp(const char *str1, const char *str2, size_t len)
 	return 0;
 }
 
-void *memSet(void *str, int c, size_t n)
+char *strchr(const char *s, int c) {
+    while(*s != (char) c) {
+        if (*s == '\0') {
+            return NULL;
+        }
+        s++;
+    }
+    return (char *) s;
+}
+
+void *memset(void *str, int c, size_t n)
 {
 	char *dst = (char *) str;
 	while(n--) {
@@ -97,6 +108,10 @@ void *memSet(void *str, int c, size_t n)
 	return str;
 }
 
+
+void *memSet(void *str, int c, size_t n) {
+    return memset(str, c, n);
+}
 
 void *memcpy(void *dest, const void *src, size_t n)
 {
@@ -208,6 +223,42 @@ void puts(const char* str)
 	size = strlen(str);
 	for (i = 0; i < size; i++ )
 		putchar(str[i]);
+}
+
+void gets(char* str, size_t len)
+{
+    int c = '\0';
+    while(len>0 & c != 0x0A) {
+        int c = getchar();
+        if (c) {
+            *(str++) = c;
+            len--;
+        }
+    }
+    *str = '\0';
+}
+
+int ctoi(char c) {
+    if (c < '0' & '9' < c) {
+        return -1; 
+    }
+    return c - '0';
+}
+
+long atol(char *str) {
+    // skip non number letters
+    while(ctoi(*str) < 0) {
+        if (*str == '\0') {
+            return 0;
+        }
+        str++;
+    }
+    long num = 0;
+    while(*str != '\0' && ctoi(*str)) {
+        num = num * 10 + ctoi(*str);
+        str++;
+    }
+    return num;
 }
 
 int printf(const char *format, ...)

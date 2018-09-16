@@ -10,4 +10,4 @@ uint8_t uart_getc();
 void uart_write(const char* buffer, size_t size);
 void uart_puts(const char* str);
 
-#endif
+#endif // UART_H

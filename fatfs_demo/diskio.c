@@ -21,7 +21,14 @@ DSTATUS disk_status(
                     BYTE drv			/* Drive number (always 0) */
                     ) {
     if (drv) return STA_NOINIT;
-    
+
+    DSTATUS s = Stat;
+    if (!(s & STA_NOINIT)) {
+        if (sdStatus()) {
+            s = STA_NOINIT;
+        }
+    }
+    Stat = s;
 	return Stat;
 }
 
@@ -54,7 +61,7 @@ DSTATUS disk_initialize (
         goto error;
     }
 
-    Stat = Stat & (!STA_NOINIT) & (!STA_NODISK);
+    Stat = (!STA_PROTECT) & (!STA_NOINIT) & (!STA_NODISK);
     
 	return Stat;
 
@@ -139,16 +146,28 @@ DRESULT disk_ioctl (
 	res = RES_ERROR;
 	switch (ctrl) {
 		case CTRL_SYNC :
-			res = RES_OK; // current sdcard.c wait until write is complete
+			res = RES_OK; // current sdcard.c always wait until write is complete
 			break;
 
 		case GET_SECTOR_COUNT :	/* Get number of sectors on the disk (DWORD) */
-            // TODO(moiz): Make the return value correct using CMD9 and CSD
-            // Right now, this always return 8GB
-            *(DWORD*)buff = 8 << (30 - 9);
-            res = RES_OK;
+            if (sdGetCSDRegister(csd)) {
+                res = RES_PARERR;
+                break;
+            }
+			if ((csd[0] >> 6) == 1) {	/* SDC ver 2.00 */
+				cs = csd[9] + ((WORD)csd[8] << 8) + ((DWORD)(csd[7] & 63) << 16) + 1;
+				*(DWORD*)buff = cs << 10;
+			} else {					/* SDC ver 1.XX or MMC */
+				n = (csd[5] & 15) + ((csd[10] & 128) >> 7) + ((csd[9] & 3) << 1) + 2;
+				cs = (csd[8] >> 6) + ((WORD)csd[7] << 2) + ((WORD)(csd[6] & 3) << 10) + 1;
+				*(DWORD*)buff = cs << (n - 9);
+			}
+            n = 32;
+            cs = 2;
+            *(DWORD*)buff = cs << (n - 9);
+			res = RES_OK;
 			break;
-
+            
 		case GET_BLOCK_SIZE :	/* Get erase block size in unit of sector (DWORD) */
 			*(DWORD*)buff = 128;
 			res = RES_OK;
