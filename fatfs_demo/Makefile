@@ -1,16 +1,16 @@
 #DFLAG = -DDEBUG
 COMMON = ../project_common
-ASRCS = $(COMMON)/boot.S
-SRCS1 = main.c sdcard.c diskio.c
+ASRCS1 = $(COMMON)/boot.S 
+SRCS1 = main.c sdcard.c diskio.c sdcard_lowlevel.c
 SRCS2 = $(COMMON)/uart.c $(COMMON)/gpio.c
 SRCS3 = $(COMMON)/mylib.c
 SRCS4 = ff.c ffunicode.c xprintf.c
-AOBJS := $(ASRCS:$(COMMON)/%.S=%.o)
+AOBJS1 := $(ASRCS1:$(COMMON)/%.S=%.o)
 OBJS1 := $(SRCS1:%.c=%.o)
 OBJS2 := $(SRCS2:$(COMMON)/%.c=%.o)
 OBJS3 := $(SRCS3:$(COMMON)/%.c=%.o)
 OBJS4 := $(SRCS4:%.c=%.o)
-OBJS := $(AOBJS) $(OBJS1) $(OBJS2) $(OBJS3) $(OBJS4)
+OBJS := $(AOBJS1) $(OBJS1) $(OBJS2) $(OBJS3) $(OBJS4)
 ARCH = armv6zk
 ISA = ARM6v2
 CPU = arm1176jzf-s
@@ -35,7 +35,10 @@ kernel.img: myos.elf
 myos.elf: $(OBJS) linker.ld
 	$(LD) -T linker.ld $(OBJS) -o myos.elf $(LFLAG)
 
-$(AOBJS): %.o: $(COMMON)/%.S
+$(AOBJS1): %.o: $(COMMON)/%.S
+	$(ASM) -c $< -o $@
+
+$(AOBJS2): %.o: %.S
 	$(ASM) -c $< -o $@
 
 # source codes unique to this folder

@@ -1,7 +1,6 @@
 #include <stdbool.h>
+#include "sdcard_lowlevel.h"
 #include "sdcard.h"
-#include "mmio.h"
-#include "gpio.h"
 #include "mylib.h"
 #include "helper.h"
 #define WAIT_400KHZ 2
@@ -15,19 +14,6 @@
 #define LOG(args...)
 #define LOGDUMP(args...)
 #endif
-
-typedef enum PIN_DIRECTION {
-    PIN_INPUT = 0,
-    PIN_OUTPUT = 1 } PIN_DIRECTION;
-
-enum PIN_NUMBER {
-    SD_DET = 47,
-    SD_CLK = 48,
-    SD_CMD = 49,
-    SD_DA0 = 50,
-    SD_DA1 = 51,
-    SD_DA2 = 52,
-    SD_DA3 = 53 } PIN_NUMBER;
 
 PIN_DIRECTION cmd_direction;
 PIN_DIRECTION data_direction;
@@ -60,22 +46,22 @@ bool sd_interface_init_done = false;
 bool sd_card_init_done = false;
 
 void clk_high_400k() {
-    gpioSet(48);
+    set_pin(SD_CLK);
     waitMicro(WAIT_400KHZ);
 }
 
 void clk_low_400k() {
-    gpioClear(48);
+    clear_pin(SD_CLK);
     waitMicro(WAIT_400KHZ);
 }
 
 void clk_high_25M() {
-    gpioSet(48);
+    set_pin(SD_CLK);
     wait(CLK_WAIT_25MHZ);
 }
 
 void clk_low_25M() {
-    gpioClear(48);
+    clear_pin(SD_CLK);
     wait(CLK_WAIT_25MHZ);
 }
 
@@ -213,43 +199,43 @@ int32_t check_crc16(uint8_t *resp, int length_of_resp, uint16_t received_crc) {
 
 void set_cmd_direction_output() {
     if (cmd_direction != PIN_OUTPUT) {
-        gpioSetFunction(SD_CMD, GPIO_OUTPUT);
+        set_pin_direction(SD_CMD, PIN_OUTPUT);
         cmd_direction = PIN_OUTPUT;
     }
 }
 
 void set_cmd_direction_input() {
     if (cmd_direction != PIN_INPUT) {
-        gpioSetFunction(SD_CMD, GPIO_INPUT);
+        set_pin_direction(SD_CMD, PIN_INPUT);
         cmd_direction = PIN_INPUT;
     }
 }
 
 void set_data_direction_output() {
     if (data_direction != PIN_OUTPUT) {
-        gpioSetFunction(SD_DA0, GPIO_OUTPUT);
-        gpioSetFunction(SD_DA1, GPIO_OUTPUT);
-        gpioSetFunction(SD_DA2, GPIO_OUTPUT);
-        gpioSetFunction(SD_DA3, GPIO_OUTPUT);
+        set_pin_direction(SD_DA0, PIN_OUTPUT);
+        set_pin_direction(SD_DA1, PIN_OUTPUT);
+        set_pin_direction(SD_DA2, PIN_OUTPUT);
+        set_pin_direction(SD_DA3, PIN_OUTPUT);
         data_direction = PIN_OUTPUT;
     }
 }
 
 void set_data_direction_input() {
     if (data_direction != PIN_INPUT) {
-        gpioSetFunction(SD_DA0, GPIO_INPUT);
-        gpioSetFunction(SD_DA1, GPIO_INPUT);
-        gpioSetFunction(SD_DA2, GPIO_INPUT);
-        gpioSetFunction(SD_DA3, GPIO_INPUT);
+        set_pin_direction(SD_DA0, PIN_INPUT);
+        set_pin_direction(SD_DA1, PIN_INPUT);
+        set_pin_direction(SD_DA2, PIN_INPUT);
+        set_pin_direction(SD_DA3, PIN_INPUT);
         data_direction = PIN_INPUT;
     }
 }
 
 void set_cmd_1bit(int32_t d) {
     if (d == 0) {
-        gpioClear(SD_CMD);
+        clear_pin(SD_CMD);
     } else {
-        gpioSet(SD_CMD);
+        set_pin(SD_CMD);
     }
 }
 
@@ -268,7 +254,7 @@ void send_cmd( uint8_t c) {
 uint8_t get_cmd_1bit() {
     uint8_t ret;
     clk_high();
-    ret = gpioRead(SD_CMD);
+    ret = get_pin_signal(SD_CMD);
     clk_low();
     return ret;
 }
@@ -286,11 +272,11 @@ uint8_t get_cmd_and_dat_4bit(uint8_t *dat) {
     uint8_t ret;
     uint8_t dat_read;
     clk_high_25M();
-    ret = gpioRead(SD_CMD);
-    dat_read  = gpioRead(SD_DA3) << 3;
-    dat_read |= gpioRead(SD_DA2) << 2;
-    dat_read |= gpioRead(SD_DA1) << 1;
-    dat_read |= gpioRead(SD_DA0);
+    ret = get_pin_signal(SD_CMD);
+    dat_read  = get_pin_signal(SD_DA3) << 3;
+    dat_read |= get_pin_signal(SD_DA2) << 2;
+    dat_read |= get_pin_signal(SD_DA1) << 1;
+    dat_read |= get_pin_signal(SD_DA0);
     clk_low_25M();
     *dat = dat_read;
     return ret;
@@ -353,7 +339,7 @@ void send_cmd_array(uint8_t *cmd_array)
 uint8_t get_dat0_1bit() {
     uint8_t ret;
     clk_high();
-    ret = gpioRead(SD_DA0);
+    ret = get_pin_signal(SD_DA0);
     clk_low();
     return ret;
 }
@@ -1246,12 +1232,12 @@ int32_t acmd51(uint8_t *resp, uint8_t *buffer)
 // send data to data bus
 void send_data_to_bus(uint8_t dat)
 {
-    enum PIN_NUMBER dat_pin[] = {SD_DA0, SD_DA1, SD_DA2, SD_DA3};
+    enum PINS dat_pin[] = {SD_DA0, SD_DA1, SD_DA2, SD_DA3};
     for (int pos = 0; pos < 4; pos++) {
         if (dat & 1) {
-            gpioSet(dat_pin[pos]);
+            set_pin(dat_pin[pos]);
         } else {
-            gpioClear(dat_pin[pos]);
+            clear_pin(dat_pin[pos]);
         }
         dat >>= 1;
     }
@@ -1387,9 +1373,7 @@ void sdInitInterface()
     }
     // GPIO SDC IF setup
 
-    // disable EMMC by disabling CLK_EN and CLK_INTLEN
-    mmio_set(EMMC_CONTROL0, 0x05, 0x00);
-
+    initialize_pins();
     // set up GPIO pins to
     // 47 : SD_CARD_DET -> Read
     // 48 : SD_CLK_R -> Write
@@ -1398,19 +1382,19 @@ void sdInitInterface()
     // 51 : SD_DATA_1 -> Read 
     // 52 : SD_DATA_2 -> Read 
     // 53 : SD_DATA_3 -> Read 
-    gpioSetFunction(SD_DET, GPIO_INPUT);
-    gpioSetFunction(SD_CLK, GPIO_OUTPUT);
-    gpioSetFunction(SD_CMD, GPIO_INPUT);
-    gpioSetFunction(SD_DA0, GPIO_INPUT);
-    gpioSetFunction(SD_DA1, GPIO_INPUT);
-    gpioSetFunction(SD_DA2, GPIO_INPUT);
-    gpioSetFunction(SD_DA3, GPIO_INPUT);
-    gpioSetPull(SD_DET, GPIO_PULLUPDOWN_UP);
-    gpioSetPull(SD_CMD, GPIO_PULLUPDOWN_UP);
-    gpioSetPull(SD_DA0, GPIO_PULLUPDOWN_UP);
-    gpioSetPull(SD_DA1, GPIO_PULLUPDOWN_UP);
-    gpioSetPull(SD_DA2, GPIO_PULLUPDOWN_UP);
-    gpioSetPull(SD_DA3, GPIO_PULLUPDOWN_UP);
+    set_pin_direction(SD_DET, PIN_INPUT);
+    set_pin_direction(SD_CLK, PIN_OUTPUT);
+    set_pin_direction(SD_CMD, PIN_INPUT);
+    set_pin_direction(SD_DA0, PIN_INPUT);
+    set_pin_direction(SD_DA1, PIN_INPUT);
+    set_pin_direction(SD_DA2, PIN_INPUT);
+    set_pin_direction(SD_DA3, PIN_INPUT);
+    set_pin_pullup(SD_DET);
+    set_pin_pullup(SD_CMD);
+    set_pin_pullup(SD_DA0);
+    set_pin_pullup(SD_DA1);
+    set_pin_pullup(SD_DA2);
+    set_pin_pullup(SD_DA3);
 
     // set initial pin directions
     cmd_direction = PIN_INPUT;

@@ -1,9 +1,6 @@
 /*----------------------------------------------------------------------*/
-/* FatFs Module Sample Program / Renesas H8/300H       (C)ChaN, 2018    */
-/*----------------------------------------------------------------------*/
-/* Ev.Board: AKI-H8/3694F from Akizuki Denshi Tsusho Co.,Ltd            */
-/* Console: SCI3 (N81 38400bps)                                         */
-/* MMC/SDC: P5.0->CLK, P5.1->DI, P5.2->DO, P5.3->CS, P5.4->WP, P5.5->INS*/
+/* FatFs Module Sample Program / Raspberry Pi                           */
+/*   Modified from Renesas H8/300H (C)ChaN, 2018                        */
 /*----------------------------------------------------------------------*/
 
 #if !defined(__cplusplus)
