@@ -22,6 +22,7 @@ PIN_DIRECTION data_direction;
 #define STOP_BIT 7
 
 #define R1_RESP_LENGTH 6
+#define R3_RESP_LENGTH 6
 #define R2_RESP_LENGTH 17
 
 static uint16_t global_card_rca = 0;
@@ -499,7 +500,6 @@ int32_t cmd8(uint8_t vhs,
         LOG("CMD response Timeout\n");
         return -1;
     }
-    check_crc7(resp, 6);
     send_clock(8);
 
     // resp[] check
@@ -521,6 +521,18 @@ int32_t cmd8(uint8_t vhs,
     return 0;
 }
 
+int get_and_check_R1_response(int cmd, uint8_t *resp) {
+    if ( get_cmd_response(R1_RESP_LENGTH, resp)) {
+        return -1;
+    }
+    send_clock(8);
+    if (check_R1_response(resp, cmd) < 0) {
+        LOG("R1 response error\n");
+        return -1;
+    }
+    return 0;
+}
+
 int32_t cmd13(uint8_t *resp, uint8_t task)
 {
     uint8_t cmd_array[] = {0x40 | 13, 0, 0, 0, 0, 0xff};
@@ -530,11 +542,7 @@ int32_t cmd13(uint8_t *resp, uint8_t task)
     if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    if ( get_cmd_response(R1_RESP_LENGTH, resp)) {
-        return -1;
-    }
-    if (check_R1_response(resp, 13) < 0) {
-        LOG("R1 response error\n");
+    if (get_and_check_R1_response(13, resp)) {
         return -1;
     }
     send_clock(512);
@@ -549,12 +557,7 @@ int32_t cmd55(uint8_t *resp)
     if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    if ( get_cmd_response(R1_RESP_LENGTH, resp)) {
-        return -1;
-    }
-    send_clock(8);
-    if (check_R1_response(resp, 55) < 0) {
-        LOG("R1 response error");
+    if (get_and_check_R1_response(55, resp)) {
         return -1;
     }
     return 0;
@@ -570,11 +573,11 @@ int32_t acmd41(uint8_t *resp)
     if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    if (get_cmd_response(R1_RESP_LENGTH, resp)) {
+    if (get_cmd_response(R3_RESP_LENGTH, resp)) {
         LOG("Response timeout\n");
         return -1;
     }
-    send_clock_400k(8);
+    send_clock(8);
     return 0;
 }
 
@@ -651,7 +654,7 @@ int32_t cmd2(uint8_t *resp)
     if (get_cmd_response(R2_RESP_LENGTH, resp)) {
         return -1;
     }
-    send_clock_400k(8);
+    send_clock(8);
     if (check_cmd2_response(resp)) {
         return -1;
     }
@@ -729,14 +732,10 @@ int32_t cmd7(uint8_t *resp, uint16_t rca)
     if (rca == 0) {
         return 0;
     }
-    if (get_cmd_response(R1_RESP_LENGTH, resp)) {
+    if (get_and_check_R1_response(7, resp)) {
         return -1;
     }
     if (wait_for_dat_rdy() < 0) {
-        return -1;
-    }
-    send_clock_400k(8);
-    if (check_R1_response(resp, 7) < 0) {
         return -1;
     }
     return 0;
@@ -858,11 +857,7 @@ int32_t acmd6(uint8_t *resp)
     if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    if (get_cmd_response(R1_RESP_LENGTH, resp)) {
-        return -1;
-    }
-    send_clock_400k(8);
-    if (check_R1_response(resp, 6) < 0) {
+    if (get_and_check_R1_response(6, resp)) {
         return -1;
     }
     return 0;
@@ -1076,16 +1071,12 @@ int32_t cmd12(uint8_t *resp)
     if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    if (get_cmd_response(R1_RESP_LENGTH, resp)) {
-        return -1;
-    }
-    if (check_R1_response(resp, 12)) {
+    if (get_and_check_R1_response(12, resp)) {
         return -1;
     }
     if (wait_for_dat_rdy() < 0) {
         return -1;
     }
-    send_clock(8);
     return 0;
 }
 
@@ -1280,10 +1271,7 @@ int32_t cmd24(uint32_t address, uint8_t *resp, const uint8_t *rwbuffer)
     if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    if (get_cmd_response(R1_RESP_LENGTH, resp)) {
-        return -1;
-    }
-    if (check_R1_response(resp, cmd)) {
+    if (get_and_check_R1_response(24, resp)) {
         return -1;
     }
     return 0;
@@ -1299,10 +1287,7 @@ int32_t cmd25(uint32_t address, uint8_t *resp, const uint8_t *rwbuffer)
     if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    if (get_cmd_response(R1_RESP_LENGTH, resp)) {
-        return -1;
-    }
-    if (check_R1_response(resp, cmd)) {
+    if (get_and_check_R1_response(25, resp)) {
         return -1;
     }
     return 0;
