@@ -20,14 +20,21 @@ Please make sure you use SDHC card that you don't need and does not have any imp
 Current the following commands are supported
 
 di 0 : initialize the sdcard
-dd 0 n : dump the content of the sdcard starting from sector n
+
+dd 0 n : dump the content of the sdcard starting from block n
+
 ds 0 : show disk status of the sdcard
 
 fi 0 : mount sdcard file system. The followin fx commands need fi 0 first.
+
 fs : shows the file system information
+
 fl [<path>] : list the files and directories
+
 fo flag filename : open a file
+
 fd size : dump the content of the currently open file up to "size" bytes
+
 fc : close the current file
 
 There are more commands available but not validated yet.
