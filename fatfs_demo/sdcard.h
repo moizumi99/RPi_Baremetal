@@ -3,13 +3,10 @@
 
 #include <stdint.h>
 
-// Check the sdcard status. Returns zero is readable
+// Check the sdcard status. Returns zero if readable
 uint8_t sdStatus();
 uint8_t sdGetCSDRegister(uint8_t *resp);
     
-// Initialization of GPIO for SD CARD
-void sdInitInterface();
-
 // SD card inital.  set to SPI mode.
 uint8_t sdInitCard();
 int32_t sdTransferBlocks( int64_t address, int32_t numBlocks, uint8_t* buffer, int32_t write );

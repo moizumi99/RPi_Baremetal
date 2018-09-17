@@ -1,7 +1,7 @@
 #DFLAG = -DDEBUG
 COMMON = ../project_common
 ASRCS1 = $(COMMON)/boot.S 
-SRCS1 = main.c sdcard.c diskio.c sdcard_lowlevel.c crc.c
+SRCS1 = main.c sdcard.c diskio.c sdcard_cmd.c sdcard_lowlevel.c crc.c
 SRCS2 = $(COMMON)/uart.c $(COMMON)/gpio.c
 SRCS3 = $(COMMON)/mylib.c
 SRCS4 = ff.c ffunicode.c xprintf.c

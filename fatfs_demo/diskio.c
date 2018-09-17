@@ -47,7 +47,6 @@ DSTATUS disk_initialize (
         return RES_NOTRDY;
     }
 
-    sdInitInterface();
     if (sdInitCard() != 0) {
         printf("Initialization procedure error\n");
         goto error;
