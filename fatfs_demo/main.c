@@ -1,6 +1,6 @@
 /*----------------------------------------------------------------------*/
 /* FatFs Module Sample Program / Raspberry Pi                           */
-/*   Modified from Renesas H8/300H (C)ChaN, 2018                        */
+/*   Modified from Renesas H8/300H version by ChaN                      */
 /*----------------------------------------------------------------------*/
 
 #if !defined(__cplusplus)
