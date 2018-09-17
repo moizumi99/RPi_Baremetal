@@ -15,8 +15,9 @@ PIN_DIRECTION data_direction;
 #define STOP_BIT 7
 
 #define R1_RESP_LENGTH 6
-#define R3_RESP_LENGTH 6
 #define R2_RESP_LENGTH 17
+#define R3_RESP_LENGTH 6
+#define R7_RESP_LENGTH 6
 
 static uint16_t global_card_rca = 0;
 static uint16_t global_clk_mode = 0;
@@ -403,7 +404,7 @@ int32_t cmd8(uint8_t vhs,
     if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    if (get_cmd_response(R1_RESP_LENGTH, resp)) {
+    if (get_cmd_response(R7_RESP_LENGTH, resp)) {
         LOG("CMD response Timeout\n");
         return -1;
     }
@@ -440,16 +441,23 @@ int get_and_check_R1_response(int cmd, uint8_t *resp) {
     return 0;
 }
 
+int send_cmd_and_check_R1_response(uint8_t *cmd_array, int cmd, uint8_t *resp) {
+    if (send_cmd_with_crc(cmd_array)) {
+        return -1;
+    }
+    if (get_and_check_R1_response(cmd, resp)) {
+        return -1;
+    }
+    return 0;
+}
+
 int32_t cmd13(uint8_t *resp, uint8_t task)
 {
     uint8_t cmd_array[] = {0x40 | 13, 0, 0, 0, 0, 0xff};
     cmd_array[1] = (global_card_rca >> 8) & 0xff;
     cmd_array[2] = global_card_rca & 0xff;
     cmd_array[3] = (task) ? 0x80 : 0;
-    if (send_cmd_with_crc(cmd_array)) {
-        return -1;
-    }
-    if (get_and_check_R1_response(13, resp)) {
+    if (send_cmd_and_check_R1_response(cmd_array, 13, resp)) {
         return -1;
     }
     send_clock(512);
@@ -461,14 +469,8 @@ int32_t cmd55(uint8_t *resp)
     uint8_t cmd_array[] = {0x40 | 55, 0, 0, 0, 0, 0xff};
     cmd_array[1] = (global_card_rca >> 8) & 0xff;
     cmd_array[2] = global_card_rca & 0xff;
-    if (send_cmd_with_crc(cmd_array)) {
-        return -1;
-    }
-    if (get_and_check_R1_response(55, resp)) {
-        return -1;
-    }
-    return 0;
-}
+    return (send_cmd_and_check_R1_response(cmd_array, 55, resp));
+ }
 
 int32_t acmd41(uint8_t *resp)
 {
@@ -761,13 +763,7 @@ int32_t acmd6(uint8_t *resp)
 {
     uint8_t cmd_array[] = {0x40 | 6, 0, 0, 0, 0, 0xff};
     cmd_array[4] = 0b010;
-    if (send_cmd_with_crc(cmd_array)) {
-        return -1;
-    }
-    if (get_and_check_R1_response(6, resp)) {
-        return -1;
-    }
-    return 0;
+    return (send_cmd_and_check_R1_response(cmd_array, 6, resp));
 }
 
 int32_t cmd23(uint32_t block_count, uint8_t *resp)
@@ -975,10 +971,7 @@ int32_t read_data_blocks(uint32_t block_counts, uint8_t *resp, uint8_t *rwbuffer
 int32_t cmd12(uint8_t *resp)
 {
     uint8_t cmd_array[] = {0x40 | 12, 0, 0, 0, 0, 0xff};
-    if (send_cmd_with_crc(cmd_array)) {
-        return -1;
-    }
-    if (get_and_check_R1_response(12, resp)) {
+    if (send_cmd_and_check_R1_response(cmd_array, 12, resp)) {
         return -1;
     }
     if (wait_for_dat_rdy() < 0) {
@@ -1172,32 +1165,18 @@ int32_t write_data(int32_t bytes_in_block, const uint8_t *rwbuffer)
 // Single write command
 int32_t cmd24(uint32_t address, uint8_t *resp, const uint8_t *rwbuffer)
 {
-    int cmd = 24;
     uint8_t cmd_array[6];
-    set_address_to_cmd_array(cmd, address, cmd_array);
-    if (send_cmd_with_crc(cmd_array)) {
-        return -1;
-    }
-    if (get_and_check_R1_response(24, resp)) {
-        return -1;
-    }
-    return 0;
+    set_address_to_cmd_array(24, address, cmd_array);
+    return send_cmd_and_check_R1_response(cmd_array, 24, resp);
 }
 
 // TODO refactor cmd24 and cmd25 (both are almost same)
 // WRITE_MULTIPLE_BLOCK command
 int32_t cmd25(uint32_t address, uint8_t *resp, const uint8_t *rwbuffer)
 {
-    int cmd = 25;
     uint8_t cmd_array[6];
-    set_address_to_cmd_array(cmd, address, cmd_array);
-    if (send_cmd_with_crc(cmd_array)) {
-        return -1;
-    }
-    if (get_and_check_R1_response(25, resp)) {
-        return -1;
-    }
-    return 0;
+    set_address_to_cmd_array(25, address, cmd_array);
+    return send_cmd_and_check_R1_response(cmd_array, 25, resp);
 }
 
 void set_rca(uint8_t *resp)
