@@ -59,5 +59,13 @@ void debug_hex_dump (const void *pBuffer, unsigned nBufLen, const char *pSource 
 // output log when DEBUG is on (use -DDEBUG in gcc option)
 #endif  // NDEBUG
 
+#ifdef DEBUG
+#define LOG(args...) printf(args)
+#define LOGDUMP(args...) dump(args)
+#else
+#define LOG(args...)
+#define LOGDUMP(args...)
+#endif
+
 #endif  // MYLIB_H
 
