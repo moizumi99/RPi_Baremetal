@@ -111,6 +111,91 @@ void send_clock(int32_t n) {
     }
 }
 
+void set_cmd_direction_output() {
+    if (cmd_direction != PIN_OUTPUT) {
+        set_pin_direction(SD_CMD, PIN_OUTPUT);
+        cmd_direction = PIN_OUTPUT;
+    }
+}
+
+void set_cmd_direction_input() {
+    if (cmd_direction != PIN_INPUT) {
+        set_pin_direction(SD_CMD, PIN_INPUT);
+        cmd_direction = PIN_INPUT;
+    }
+}
+
+void set_data_direction_output() {
+    if (data_direction != PIN_OUTPUT) {
+        set_pin_direction(SD_DA0, PIN_OUTPUT);
+        set_pin_direction(SD_DA1, PIN_OUTPUT);
+        set_pin_direction(SD_DA2, PIN_OUTPUT);
+        set_pin_direction(SD_DA3, PIN_OUTPUT);
+        data_direction = PIN_OUTPUT;
+    }
+}
+
+void set_data_direction_input() {
+    if (data_direction != PIN_INPUT) {
+        set_pin_direction(SD_DA0, PIN_INPUT);
+        set_pin_direction(SD_DA1, PIN_INPUT);
+        set_pin_direction(SD_DA2, PIN_INPUT);
+        set_pin_direction(SD_DA3, PIN_INPUT);
+        data_direction = PIN_INPUT;
+    }
+}
+
+void set_cmd_1bit(int32_t d) {
+    if (d == 0) {
+        clear_pin(SD_CMD);
+    } else {
+        set_pin(SD_CMD);
+    }
+}
+
+// send command
+void send_cmd( uint8_t c) {
+    for (int32_t i = 0; i < 8; i++) {
+        set_cmd_1bit(c & 0x80);
+        clk_high();
+        clk_low();
+        c <<= 1;
+    }
+    set_cmd_1bit(1);
+}
+
+// get command response
+uint8_t get_cmd_1bit() {
+    uint8_t ret;
+    clk_high();
+    ret = get_pin_signal(SD_CMD);
+    clk_low();
+    return ret;
+}
+
+int32_t get_cmd_byte() {
+    int32_t ret = 0;
+    for (int32_t i=0; i < 8; i++) {
+        ret = (ret << 1) | get_cmd_1bit();
+    }
+    return ret;
+}
+
+// get command response and data response
+uint8_t get_cmd_and_dat_4bit(uint8_t *dat) {
+    uint8_t ret;
+    uint8_t dat_read;
+    clk_high_25M();
+    ret = get_pin_signal(SD_CMD);
+    dat_read  = get_pin_signal(SD_DA3) << 3;
+    dat_read |= get_pin_signal(SD_DA2) << 2;
+    dat_read |= get_pin_signal(SD_DA1) << 1;
+    dat_read |= get_pin_signal(SD_DA0);
+    clk_low_25M();
+    *dat = dat_read;
+    return ret;
+}
+
 uint8_t crc7(const uint8_t *buff, int32_t len )
 {
     uint8_t crc = 0;
@@ -195,91 +280,6 @@ int32_t check_crc16(uint8_t *resp, int length_of_resp, uint16_t received_crc) {
         return -1;
     }
     return 0;
-}
-
-void set_cmd_direction_output() {
-    if (cmd_direction != PIN_OUTPUT) {
-        set_pin_direction(SD_CMD, PIN_OUTPUT);
-        cmd_direction = PIN_OUTPUT;
-    }
-}
-
-void set_cmd_direction_input() {
-    if (cmd_direction != PIN_INPUT) {
-        set_pin_direction(SD_CMD, PIN_INPUT);
-        cmd_direction = PIN_INPUT;
-    }
-}
-
-void set_data_direction_output() {
-    if (data_direction != PIN_OUTPUT) {
-        set_pin_direction(SD_DA0, PIN_OUTPUT);
-        set_pin_direction(SD_DA1, PIN_OUTPUT);
-        set_pin_direction(SD_DA2, PIN_OUTPUT);
-        set_pin_direction(SD_DA3, PIN_OUTPUT);
-        data_direction = PIN_OUTPUT;
-    }
-}
-
-void set_data_direction_input() {
-    if (data_direction != PIN_INPUT) {
-        set_pin_direction(SD_DA0, PIN_INPUT);
-        set_pin_direction(SD_DA1, PIN_INPUT);
-        set_pin_direction(SD_DA2, PIN_INPUT);
-        set_pin_direction(SD_DA3, PIN_INPUT);
-        data_direction = PIN_INPUT;
-    }
-}
-
-void set_cmd_1bit(int32_t d) {
-    if (d == 0) {
-        clear_pin(SD_CMD);
-    } else {
-        set_pin(SD_CMD);
-    }
-}
-
-// send command
-void send_cmd( uint8_t c) {
-    for (int32_t i = 0; i < 8; i++) {
-        set_cmd_1bit(c & 0x80);
-        clk_high();
-        clk_low();
-        c <<= 1;
-    }
-    set_cmd_1bit(1);
-}
-
-// get command response
-uint8_t get_cmd_1bit() {
-    uint8_t ret;
-    clk_high();
-    ret = get_pin_signal(SD_CMD);
-    clk_low();
-    return ret;
-}
-
-int32_t get_cmd_byte() {
-    int32_t ret = 0;
-    for (int32_t i=0; i < 8; i++) {
-        ret = (ret << 1) | get_cmd_1bit();
-    }
-    return ret;
-}
-
-// get command response and data response
-uint8_t get_cmd_and_dat_4bit(uint8_t *dat) {
-    uint8_t ret;
-    uint8_t dat_read;
-    clk_high_25M();
-    ret = get_pin_signal(SD_CMD);
-    dat_read  = get_pin_signal(SD_DA3) << 3;
-    dat_read |= get_pin_signal(SD_DA2) << 2;
-    dat_read |= get_pin_signal(SD_DA1) << 1;
-    dat_read |= get_pin_signal(SD_DA0);
-    clk_low_25M();
-    *dat = dat_read;
-    return ret;
 }
 
 int32_t get_cmd_response(uint32_t length, uint8_t *resp)
@@ -469,13 +469,21 @@ int32_t check_R1_response(uint8_t *resp, uint8_t cmd)
     return ret;
 }
 
-int32_t cmd0() {
-    uint8_t cmd_array[] = {0x40, 0, 0, 0, 0, 0xff};
+int send_cmd_with_crc(uint8_t cmd_array[]) {
     add_crc(cmd_array);
     if (wait_for_cmd_rdy() < 0) {
+        LOG("CMD ready Timeout\n");
         return -1;
     }
     send_cmd_array(cmd_array);
+    return 0;
+}
+
+int32_t cmd0() {
+    uint8_t cmd_array[] = {0x40, 0, 0, 0, 0, 0xff};
+    if (send_cmd_with_crc(cmd_array)) {
+        return -1;
+    }
     send_clock(8);
     return 0;
 }
@@ -484,12 +492,9 @@ int32_t cmd8(uint8_t vhs,
                    uint8_t checkpattern, uint8_t *resp)
 {
     uint8_t cmd_array[] = {0x40 | 8, 0, 0, vhs, checkpattern, 0xff};
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
-        LOG("CMD ready Timeout\n");
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    send_cmd_array(cmd_array);
     if (get_cmd_response(R1_RESP_LENGTH, resp)) {
         LOG("CMD response Timeout\n");
         return -1;
@@ -522,11 +527,9 @@ int32_t cmd13(uint8_t *resp, uint8_t task)
     cmd_array[1] = (global_card_rca >> 8) & 0xff;
     cmd_array[2] = global_card_rca & 0xff;
     cmd_array[3] = (task) ? 0x80 : 0;
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    send_cmd_array(cmd_array);
     if ( get_cmd_response(R1_RESP_LENGTH, resp)) {
         return -1;
     }
@@ -543,11 +546,9 @@ int32_t cmd55(uint8_t *resp)
     uint8_t cmd_array[] = {0x40 | 55, 0, 0, 0, 0, 0xff};
     cmd_array[1] = (global_card_rca >> 8) & 0xff;
     cmd_array[2] = global_card_rca & 0xff;
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    send_cmd_array(cmd_array);
     if ( get_cmd_response(R1_RESP_LENGTH, resp)) {
         return -1;
     }
@@ -566,11 +567,9 @@ int32_t acmd41(uint8_t *resp)
     cmd_array[2] = 0x30; // OCR: 3.3-3.4, 3.3-3.2
     cmd_array[3] = 0;    // OCR
     cmd_array[4] = 0;    // OCR
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    send_cmd_array(cmd_array);
     if (get_cmd_response(R1_RESP_LENGTH, resp)) {
         LOG("Response timeout\n");
         return -1;
@@ -646,11 +645,9 @@ int32_t check_cmd2_response(uint8_t *resp)
 int32_t cmd2(uint8_t *resp)
 {
     uint8_t cmd_array[] = {0x40 | 2, 0, 0, 0, 0, 0xff};
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    send_cmd_array(cmd_array);
     if (get_cmd_response(R2_RESP_LENGTH, resp)) {
         return -1;
     }
@@ -705,11 +702,9 @@ int32_t check_cmd3_response(uint8_t *resp)
 int32_t cmd3(uint8_t *resp)
 {
     uint8_t cmd_array[] = {0x40 | 3, 0, 0, 0, 0, 0xff};
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    send_cmd_array(cmd_array);
     if (get_cmd_response(R1_RESP_LENGTH, resp)) {
         return -1;
     }
@@ -728,11 +723,9 @@ int32_t cmd7(uint8_t *resp, uint16_t rca)
     cmd_array[2] = rca & 0xff;
     /* cmd_array[1] = (global_card_rca >> 8) & 0xff; */
     /* cmd_array[2] = global_card_rca & 0xff; */
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    send_cmd_array(cmd_array);
     if (rca == 0) {
         return 0;
     }
@@ -844,13 +837,9 @@ int32_t cmd9(uint8_t *resp)
     uint8_t cmd_array[] = {0x40 | 9, 0, 0, 0, 0, 0xff};
     cmd_array[1] = (global_card_rca >> 8) & 0xff;
     cmd_array[2] = global_card_rca & 0xff;
-    add_crc(cmd_array);
-    send_clock(16);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    LOG("CMD9 start.\n");
-    send_cmd_array(cmd_array);
     if (get_cmd_response(R2_RESP_LENGTH, resp)) {
         LOG("No response for CMD9. Time out.\n");
         return -1;
@@ -866,11 +855,9 @@ int32_t acmd6(uint8_t *resp)
 {
     uint8_t cmd_array[] = {0x40 | 6, 0, 0, 0, 0, 0xff};
     cmd_array[4] = 0b010;
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    send_cmd_array(cmd_array);
     if (get_cmd_response(R1_RESP_LENGTH, resp)) {
         return -1;
     }
@@ -888,11 +875,9 @@ int32_t cmd23(uint32_t block_count, uint8_t *resp)
     cmd_array[2] = (block_count >> 16) & 0xff;
     cmd_array[3] = (block_count >>  8) & 0xff;
     cmd_array[4] = block_count & 0xff;
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    send_cmd_array(cmd_array);
     int32_t ret = get_cmd_response(R1_RESP_LENGTH, resp);
     send_clock(8);
     if (ret < 0) {
@@ -1088,11 +1073,9 @@ int32_t read_data_blocks(uint32_t block_counts, uint8_t *resp, uint8_t *rwbuffer
 int32_t cmd12(uint8_t *resp)
 {
     uint8_t cmd_array[] = {0x40 | 12, 0, 0, 0, 0, 0xff};
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    send_cmd_array(cmd_array);
     if (get_cmd_response(R1_RESP_LENGTH, resp)) {
         return -1;
     }
@@ -1112,36 +1095,15 @@ void set_address_to_cmd_array(int cmd, uint32_t address, uint8_t *cmd_array) {
     cmd_array[2] = (address >> 16) & 0xFF;
     cmd_array[3] = (address >> 8) & 0xFF;
     cmd_array[4] = address & 0xFF;
-    add_crc(cmd_array);
-}
-
-int32_t cmd18_17(int cmd, uint32_t address, uint32_t block_counts, uint8_t *resp, uint8_t *rwbuffer)
-{
-    uint8_t cmd_array[6];
-    set_address_to_cmd_array(cmd, address, cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
-        return -1;
-    }
-    
-    send_cmd_array(cmd_array);
-    int32_t data_cnt = read_data_blocks(block_counts, resp, rwbuffer);
-    if (check_R1_response(resp, cmd) < 0) {
-        return -1;
-    }
-    send_clock(8);
-    
-    return data_cnt;
 }
 
 int32_t cmd17(uint32_t address, uint8_t *resp, uint8_t *rwbuffer) {
     const int cmd = 17;
     uint8_t cmd_array[6];
     set_address_to_cmd_array(cmd, address, cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    
-    send_cmd_array(cmd_array);
     int32_t data_cnt = read_data(resp, 512, rwbuffer);
     if (check_R1_response(resp, cmd) < 0) {
         return -1;
@@ -1155,11 +1117,9 @@ int32_t cmd18(uint32_t address, uint32_t block_counts, uint8_t *resp, uint8_t *r
     const int cmd = 18;
     uint8_t cmd_array[6];
     set_address_to_cmd_array(cmd, address, cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    
-    send_cmd_array(cmd_array);
     int32_t data_cnt = read_data_blocks(block_counts, resp, rwbuffer);
     if (check_R1_response(resp, cmd) < 0) {
         return -1;
@@ -1185,12 +1145,9 @@ int32_t cmd6(uint8_t function_group, uint8_t function, uint8_t *resp, uint8_t *r
         ;
     }
     cmd_array[1] = 0x80; // switch function
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    LOG("Send cmd6 command\n");
-    send_cmd_array(cmd_array);
     
     LOG("Read sd card status\n");
     // SD CARD status is 512 bits
@@ -1207,13 +1164,9 @@ int32_t cmd6(uint8_t function_group, uint8_t function, uint8_t *resp, uint8_t *r
 int32_t acmd51(uint8_t *resp, uint8_t *buffer)
 {
     uint8_t cmd_array[] = {0x40 | 51, 0, 0, 0, 0, 0xff};
-    add_crc(cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    LOG("Send command\n");
-    send_cmd_array(cmd_array);
-    
     LOG("Read data\n");
     // SCR status is 64 bits
     int32_t data_cnt = read_data(resp, 64 / 8, buffer);
@@ -1324,10 +1277,9 @@ int32_t cmd24(uint32_t address, uint8_t *resp, const uint8_t *rwbuffer)
     int cmd = 24;
     uint8_t cmd_array[6];
     set_address_to_cmd_array(cmd, address, cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    send_cmd_array(cmd_array);
     if (get_cmd_response(R1_RESP_LENGTH, resp)) {
         return -1;
     }
@@ -1344,10 +1296,9 @@ int32_t cmd25(uint32_t address, uint8_t *resp, const uint8_t *rwbuffer)
     int cmd = 25;
     uint8_t cmd_array[6];
     set_address_to_cmd_array(cmd, address, cmd_array);
-    if (wait_for_cmd_rdy() < 0) {
+    if (send_cmd_with_crc(cmd_array)) {
         return -1;
     }
-    send_cmd_array(cmd_array);
     if (get_cmd_response(R1_RESP_LENGTH, resp)) {
         return -1;
     }
